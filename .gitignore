@@ -1,0 +1,3 @@
+node_modules/
+package/lib/node_modules/
+package/lib/package-lock.json

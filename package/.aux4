@@ -1,0 +1,1002 @@
+{
+  "scope": "aux4",
+  "name": "browser",
+  "version": "1.0.0",
+  "description": "Headless browser automation with daemon architecture and multi-agent session management",
+  "license": "Apache-2.0",
+  "git": "https://github.com/aux4/browser",
+  "dependencies": [
+    "aux4/playbook"
+  ],
+  "tags": [
+    "aux4",
+    "browser",
+    "playwright",
+    "headless",
+    "automation"
+  ],
+  "profiles": [
+    {
+      "name": "main",
+      "commands": [
+        {
+          "name": "browser",
+          "execute": [
+            "profile:browser"
+          ],
+          "help": {
+            "text": "Headless browser automation"
+          }
+        }
+      ]
+    },
+    {
+      "name": "browser",
+      "commands": [
+        {
+          "name": "start",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs start values(maxSessions,persistent,channel,browser)"
+          ],
+          "help": {
+            "text": "Start the browser daemon",
+            "variables": [
+              {
+                "name": "maxSessions",
+                "text": "Maximum concurrent sessions",
+                "default": "10"
+              },
+              {
+                "name": "persistent",
+                "text": "Keep daemon running when all sessions close",
+                "default": "false"
+              },
+              {
+                "name": "channel",
+                "text": "Browser channel (e.g. chrome, msedge)",
+                "default": ""
+              },
+              {
+                "name": "browser",
+                "text": "Browser engine: chromium, firefox, webkit",
+                "default": "chromium"
+              }
+            ]
+          }
+        },
+        {
+          "name": "stop",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs stop"
+          ],
+          "help": {
+            "text": "Stop the browser daemon"
+          }
+        },
+        {
+          "name": "open",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video)"
+          ],
+          "help": {
+            "text": "Open a new browser session",
+            "variables": [
+              {
+                "name": "url",
+                "text": "URL to navigate to",
+                "default": ""
+              },
+              {
+                "name": "timeout",
+                "text": "Session idle timeout (e.g. 10m, 1h)",
+                "default": "10m"
+              },
+              {
+                "name": "width",
+                "text": "Viewport width",
+                "default": "1280"
+              },
+              {
+                "name": "height",
+                "text": "Viewport height",
+                "default": "720"
+              },
+              {
+                "name": "output",
+                "text": "Directory to save artifacts (screenshots, videos)",
+                "default": ""
+              },
+              {
+                "name": "video",
+                "text": "Video recording mode: on, off, retain-on-failure",
+                "default": "off"
+              }
+            ]
+          }
+        },
+        {
+          "name": "close",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs close values(session)"
+          ],
+          "help": {
+            "text": "Close a browser session",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "list",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs list"
+          ],
+          "help": {
+            "text": "List active browser sessions"
+          }
+        },
+        {
+          "name": "visit",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs visit values(session,url)"
+          ],
+          "help": {
+            "text": "Navigate to a URL",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "url",
+                "text": "URL to navigate to",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "back",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs back values(session)"
+          ],
+          "help": {
+            "text": "Go back in browser history",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "forward",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs forward values(session)"
+          ],
+          "help": {
+            "text": "Go forward in browser history",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "reload",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs reload values(session)"
+          ],
+          "help": {
+            "text": "Reload the current page",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "click",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs click values(session,name,role)"
+          ],
+          "help": {
+            "text": "Click an element",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "name",
+                "text": "Accessible name of the element",
+                "required": true
+              },
+              {
+                "name": "role",
+                "text": "ARIA role",
+                "default": "button"
+              }
+            ]
+          }
+        },
+        {
+          "name": "click-selector",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs click-selector values(session,selector)"
+          ],
+          "help": {
+            "text": "Click an element by CSS selector",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector to click",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "click-text",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs click-text values(session,text)"
+          ],
+          "help": {
+            "text": "Click an element by its text content",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "text",
+                "text": "Text content to find and click",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "type",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name,value,role)"
+          ],
+          "help": {
+            "text": "Type text into an input field",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "name",
+                "text": "Accessible name of the field",
+                "required": true
+              },
+              {
+                "name": "value",
+                "text": "Text to type",
+                "required": true
+              },
+              {
+                "name": "role",
+                "text": "ARIA role",
+                "default": "textbox"
+              }
+            ]
+          }
+        },
+        {
+          "name": "scroll",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs scroll values(session,direction,amount)"
+          ],
+          "help": {
+            "text": "Scroll the page",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "direction",
+                "text": "Scroll direction",
+                "default": "down"
+              },
+              {
+                "name": "amount",
+                "text": "Scroll amount in pixels",
+                "default": "500"
+              }
+            ]
+          }
+        },
+        {
+          "name": "select",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs select values(session,name,value,role)"
+          ],
+          "help": {
+            "text": "Select an option from a dropdown",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "name",
+                "text": "Accessible name of the select element",
+                "required": true
+              },
+              {
+                "name": "value",
+                "text": "Option value to select",
+                "required": true
+              },
+              {
+                "name": "role",
+                "text": "ARIA role",
+                "default": "combobox"
+              }
+            ]
+          }
+        },
+        {
+          "name": "check",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs check values(session,name,role)"
+          ],
+          "help": {
+            "text": "Check a checkbox",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "name",
+                "text": "Accessible name of the checkbox",
+                "required": true
+              },
+              {
+                "name": "role",
+                "text": "ARIA role",
+                "default": "checkbox"
+              }
+            ]
+          }
+        },
+        {
+          "name": "uncheck",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs uncheck values(session,name,role)"
+          ],
+          "help": {
+            "text": "Uncheck a checkbox",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "name",
+                "text": "Accessible name of the checkbox",
+                "required": true
+              },
+              {
+                "name": "role",
+                "text": "ARIA role",
+                "default": "checkbox"
+              }
+            ]
+          }
+        },
+        {
+          "name": "hover",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs hover values(session,name,role)"
+          ],
+          "help": {
+            "text": "Hover over an element",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "name",
+                "text": "Accessible name of the element",
+                "required": true
+              },
+              {
+                "name": "role",
+                "text": "ARIA role",
+                "default": "button"
+              }
+            ]
+          }
+        },
+        {
+          "name": "press",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs press values(session,key)"
+          ],
+          "help": {
+            "text": "Press a keyboard key",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "key",
+                "text": "Key to press (e.g. Enter, Tab, Escape, ArrowDown)",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "clear",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs clear values(session,name,role)"
+          ],
+          "help": {
+            "text": "Clear an input field",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "name",
+                "text": "Accessible name of the field",
+                "required": true
+              },
+              {
+                "name": "role",
+                "text": "ARIA role",
+                "default": "textbox"
+              }
+            ]
+          }
+        },
+        {
+          "name": "upload",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs upload values(session,name,file)"
+          ],
+          "help": {
+            "text": "Upload a file",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "name",
+                "text": "Accessible name or label of the file input",
+                "required": true
+              },
+              {
+                "name": "file",
+                "text": "Path to the file to upload",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "content",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs content values(session,selector,format)"
+          ],
+          "help": {
+            "text": "Get page content",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector",
+                "default": ""
+              },
+              {
+                "name": "format",
+                "text": "Output format: markdown, html, text",
+                "default": "markdown"
+              }
+            ]
+          }
+        },
+        {
+          "name": "screenshot",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs screenshot values(session,output,fullPage)"
+          ],
+          "help": {
+            "text": "Take a screenshot",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "output",
+                "text": "Output file path",
+                "default": "screenshot.png"
+              },
+              {
+                "name": "fullPage",
+                "text": "Capture full page",
+                "default": "false"
+              }
+            ]
+          }
+        },
+        {
+          "name": "wait",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs wait values(session,selector,timeout)"
+          ],
+          "help": {
+            "text": "Wait for a selector to appear",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector to wait for",
+                "required": true
+              },
+              {
+                "name": "timeout",
+                "text": "Timeout in milliseconds",
+                "default": "5000"
+              }
+            ]
+          }
+        },
+        {
+          "name": "expect",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs expect values(session,selector,assertion,expected,timeout)"
+          ],
+          "help": {
+            "text": "Assert expectations on page elements",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector",
+                "required": true
+              },
+              {
+                "name": "assertion",
+                "text": "Assertion type: have_text, be_visible, exist, not_exist, have_attribute, have_count",
+                "required": true
+              },
+              {
+                "name": "expected",
+                "text": "Expected value (for have_text, have_attribute, have_count)",
+                "default": ""
+              },
+              {
+                "name": "timeout",
+                "text": "Timeout in milliseconds",
+                "default": "5000"
+              }
+            ]
+          }
+        },
+        {
+          "name": "click-item",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs click-item values(session,item,selector)"
+          ],
+          "help": {
+            "text": "Click a list item by text or index",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "item",
+                "text": "Item text or 1-based index",
+                "required": true
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector for the list container",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "expect-list",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs expect-list values(session,assertion,expected,selector,timeout)"
+          ],
+          "help": {
+            "text": "Assert expectations on lists",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "assertion",
+                "text": "Assertion type: at_least, contains",
+                "required": true
+              },
+              {
+                "name": "expected",
+                "text": "Expected value (count or text)",
+                "required": true
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector for the list container",
+                "default": ""
+              },
+              {
+                "name": "timeout",
+                "text": "Timeout in milliseconds",
+                "default": "5000"
+              }
+            ]
+          }
+        },
+        {
+          "name": "get-items",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs get-items values(session,selector)"
+          ],
+          "help": {
+            "text": "Get text content of list items",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector for the list container",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "execute",
+          "execute": [
+            "aux4 playbook execute ${instructions} --session ${session}"
+          ],
+          "help": {
+            "text": "Execute a playbook script with browser skills",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "instructions",
+                "text": "Path to playbook script file",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "eval",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs eval values(session,script)"
+          ],
+          "help": {
+            "text": "Evaluate JavaScript in the page",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "script",
+                "text": "JavaScript code to evaluate",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "cookies",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs cookies values(session,export,import)"
+          ],
+          "help": {
+            "text": "Manage cookies",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "export",
+                "text": "Export cookies to file",
+                "default": ""
+              },
+              {
+                "name": "import",
+                "text": "Import cookies from file",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "download",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs download values(session,url,output)"
+          ],
+          "help": {
+            "text": "Download a file",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "url",
+                "text": "URL to download",
+                "required": true
+              },
+              {
+                "name": "output",
+                "text": "Output file path",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "set-scope",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs set-scope values(session,selector)"
+          ],
+          "help": {
+            "text": "Set element scope for subsequent commands",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector to scope to",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "clear-scope",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs clear-scope values(session)"
+          ],
+          "help": {
+            "text": "Clear element scope",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "new-tab",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs new-tab values(session,url)"
+          ],
+          "help": {
+            "text": "Open a new tab",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "url",
+                "text": "URL to open in new tab",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "switch-tab",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs switch-tab values(session,tab)"
+          ],
+          "help": {
+            "text": "Switch to a tab",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "tab",
+                "text": "Tab index",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "close-tab",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs close-tab values(session,tab)"
+          ],
+          "help": {
+            "text": "Close a tab",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "tab",
+                "text": "Tab index",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "list-tabs",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs list-tabs values(session)"
+          ],
+          "help": {
+            "text": "List tabs in a session",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "run",
+          "execute": [
+            "aux4 browser start --persistent true --channel \"${channel}\" --browser \"${browser}\" >/dev/null 2>&1 & sleep 3; SESSION=$(aux4 browser open --url \"${url}\" --width \"${width}\" --height \"${height}\" --output \"${output}\" --video \"${video}\" 2>/dev/null); aux4 playbook execute ${instructions} --session $SESSION; EXIT=$?; aux4 browser close --session $SESSION >/dev/null 2>&1; aux4 browser stop >/dev/null 2>&1; exit $EXIT"
+          ],
+          "help": {
+            "text": "Run a playbook script (one-shot mode)",
+            "variables": [
+              {
+                "name": "url",
+                "text": "Initial URL to navigate to",
+                "default": ""
+              },
+              {
+                "name": "width",
+                "text": "Viewport width",
+                "default": "1280"
+              },
+              {
+                "name": "height",
+                "text": "Viewport height",
+                "default": "720"
+              },
+              {
+                "name": "instructions",
+                "text": "Path to playbook script file",
+                "required": true
+              },
+              {
+                "name": "output",
+                "text": "Directory to save artifacts (screenshots, videos)",
+                "default": ""
+              },
+              {
+                "name": "video",
+                "text": "Video recording mode: on, off, retain-on-failure",
+                "default": "off"
+              },
+              {
+                "name": "channel",
+                "text": "Browser channel (e.g. chrome, msedge)",
+                "default": ""
+              },
+              {
+                "name": "browser",
+                "text": "Browser engine: chromium, firefox, webkit",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "mcp",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs mcp"
+          ],
+          "help": {
+            "text": "Start MCP server mode"
+          }
+        }
+      ]
+    },
+    {
+      "name": "playbook:skills",
+      "commands": [
+        {
+          "name": "browser",
+          "execute": [
+            "cat ${packageDir}/skills/browser.yaml"
+          ],
+          "help": {
+            "text": "Browser automation skills for playbook"
+          }
+        }
+      ]
+    }
+  ]
+}

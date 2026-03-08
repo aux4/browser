@@ -1,0 +1,19 @@
+{
+  "name": "@aux4/browser",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Headless browser automation with daemon architecture and multi-agent session management",
+  "scripts": {
+    "build": "rollup -c && cp package/lib/package.json package/lib/package.json.bak 2>/dev/null; npm install --prefix package/lib; rm -f package/lib/package.json.bak",
+    "test": "aux4 test run"
+  },
+  "keywords": ["aux4", "browser", "playwright", "headless", "automation"],
+  "author": "aux4",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^28.0.6",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "rollup": "^4.46.3"
+  }
+}
