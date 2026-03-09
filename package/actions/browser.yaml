@@ -1,4 +1,4 @@
-skills:
+actions:
   - expression: "go to {url}"
     execute: "aux4 browser visit --session {{session}} --url ${url}"
   - expression: "visit {url}"

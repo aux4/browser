@@ -718,7 +718,7 @@
             "aux4 playbook execute ${instructions} --session ${session}"
           ],
           "help": {
-            "text": "Execute a playbook script with browser skills",
+            "text": "Execute a playbook script with browser actions",
             "variables": [
               {
                 "name": "session",
@@ -985,15 +985,15 @@
       ]
     },
     {
-      "name": "playbook:skills",
+      "name": "playbook:actions",
       "commands": [
         {
           "name": "browser",
           "execute": [
-            "cat ${packageDir}/skills/browser.yaml"
+            "cat ${packageDir}/actions/browser.yaml"
           ],
           "help": {
-            "text": "Browser automation skills for playbook"
+            "text": "Browser automation actions for playbook"
           }
         }
       ]
