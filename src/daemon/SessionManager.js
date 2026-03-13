@@ -425,7 +425,7 @@ export class SessionManager {
     const page = session.pages[session.activeTab];
     const [download] = await Promise.all([
       page.waitForEvent("download"),
-      page.goto(params.url)
+      page.goto(params.url).catch(() => {})
     ]);
     await download.saveAs(params.output);
     return { status: "ok", path: params.output };
