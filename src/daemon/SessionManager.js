@@ -410,6 +410,16 @@ export class SessionManager {
     return { cookies };
   }
 
+  async savePdf(sessionId, params) {
+    const session = this.getSession(sessionId);
+    const page = session.pages[session.activeTab];
+    const options = { path: params.output || "page.pdf" };
+    if (params.format) options.format = params.format;
+    if (params.printBackground === "true" || params.printBackground === true) options.printBackground = true;
+    await page.pdf(options);
+    return { status: "ok", path: options.path };
+  }
+
   async download(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
@@ -546,6 +556,7 @@ export class SessionManager {
       case "scroll": return this.scroll(sessionId, params);
       case "content": return this.content(sessionId, params);
       case "screenshot": return this.screenshot(sessionId, params);
+      case "save-pdf": return this.savePdf(sessionId, params);
       case "wait": return this.wait(sessionId, params);
       case "eval": return this.evaluate(sessionId, params.script);
       case "expect": return this.expect(sessionId, params);

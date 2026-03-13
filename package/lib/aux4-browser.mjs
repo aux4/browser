@@ -463,6 +463,16 @@ class SessionManager {
     return { cookies };
   }
 
+  async savePdf(sessionId, params) {
+    const session = this.getSession(sessionId);
+    const page = session.pages[session.activeTab];
+    const options = { path: params.output || "page.pdf" };
+    if (params.format) options.format = params.format;
+    if (params.printBackground === "true" || params.printBackground === true) options.printBackground = true;
+    await page.pdf(options);
+    return { status: "ok", path: options.path };
+  }
+
   async download(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
@@ -599,6 +609,7 @@ class SessionManager {
       case "scroll": return this.scroll(sessionId, params);
       case "content": return this.content(sessionId, params);
       case "screenshot": return this.screenshot(sessionId, params);
+      case "save-pdf": return this.savePdf(sessionId, params);
       case "wait": return this.wait(sessionId, params);
       case "eval": return this.evaluate(sessionId, params.script);
       case "expect": return this.expect(sessionId, params);
@@ -749,6 +760,7 @@ class DaemonServer {
       case "clear-scope": return this.sessionManager.clearScope(params.session);
       case "cookies": return this.sessionManager.cookies(params.session, params);
       case "download": return this.sessionManager.download(params.session, params);
+      case "save-pdf": return this.sessionManager.savePdf(params.session, params);
       case "new-tab": return this.sessionManager.newTab(params.session, params.url);
       case "switch-tab": return this.sessionManager.switchTab(params.session, parseInt(params.tab));
       case "close-tab": return this.sessionManager.closeTab(params.session, parseInt(params.tab));
@@ -1019,6 +1031,17 @@ async function DownloadCommand(params) {
     session: params.session,
     url: params.url,
     output: params.output
+  });
+  console.log(result.path);
+}
+
+async function SavePdfCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("save-pdf", {
+    session: params.session,
+    output: params.output,
+    format: params.format,
+    printBackground: params.printBackground
   });
   console.log(result.path);
 }
@@ -1357,6 +1380,7 @@ const commands = {
   "get-items": { handler: GetItemsCommand, args: ["session", "selector"] },
   cookies:     { handler: CookiesCommand,  args: ["session", "export", "import"] },
   download:    { handler: DownloadCommand, args: ["session", "url", "output"] },
+  "save-pdf":  { handler: SavePdfCommand,  args: ["session", "output", "format", "printBackground"] },
   select:      { handler: SelectCommand,   args: ["session", "name", "value", "role"] },
   check:       { handler: CheckCommand,    args: ["session", "name", "role"] },
   uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role"] },

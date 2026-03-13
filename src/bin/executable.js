@@ -22,6 +22,7 @@ import { EvalCommand } from "../commands/EvalCommand.js";
 import { ExpectCommand } from "../commands/ExpectCommand.js";
 import { CookiesCommand } from "../commands/CookiesCommand.js";
 import { DownloadCommand } from "../commands/DownloadCommand.js";
+import { SavePdfCommand } from "../commands/SavePdfCommand.js";
 import { NewTabCommand, SwitchTabCommand, CloseTabCommand, ListTabsCommand } from "../commands/TabsCommand.js";
 import { SelectCommand } from "../commands/SelectCommand.js";
 import { CheckCommand, UncheckCommand } from "../commands/CheckCommand.js";
@@ -61,6 +62,7 @@ const commands = {
   "get-items": { handler: GetItemsCommand, args: ["session", "selector"] },
   cookies:     { handler: CookiesCommand,  args: ["session", "export", "import"] },
   download:    { handler: DownloadCommand, args: ["session", "url", "output"] },
+  "save-pdf":  { handler: SavePdfCommand,  args: ["session", "output", "format", "printBackground"] },
   select:      { handler: SelectCommand,   args: ["session", "name", "value", "role"] },
   check:       { handler: CheckCommand,    args: ["session", "name", "role"] },
   uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role"] },

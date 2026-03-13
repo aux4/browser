@@ -118,6 +118,7 @@ export class DaemonServer {
       case "clear-scope": return this.sessionManager.clearScope(params.session);
       case "cookies": return this.sessionManager.cookies(params.session, params);
       case "download": return this.sessionManager.download(params.session, params);
+      case "save-pdf": return this.sessionManager.savePdf(params.session, params);
       case "new-tab": return this.sessionManager.newTab(params.session, params.url);
       case "switch-tab": return this.sessionManager.switchTab(params.session, parseInt(params.tab));
       case "close-tab": return this.sessionManager.closeTab(params.session, parseInt(params.tab));
