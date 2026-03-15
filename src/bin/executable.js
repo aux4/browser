@@ -88,6 +88,10 @@ if (!command) {
 const params = {};
 command.args.forEach((name, i) => {
   if (values[i] !== undefined && values[i] !== "") {
+    try {
+      const parsed = JSON.parse(values[i]);
+      if (Array.isArray(parsed)) { params[name] = parsed; return; }
+    } catch {}
     params[name] = values[i];
   }
 });
