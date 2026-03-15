@@ -957,7 +957,7 @@ function resolveSecret(value) {
 
   const provider = parts[0];
   const field = parts[parts.length - 1];
-  const ref = `secret://${parts.slice(0, parts.length - 1).join("/")}`;
+  const ref = parts.slice(1, parts.length - 1).join("/");
 
   try {
     const output = execSync(
