@@ -1,5 +1,4 @@
 import { DaemonClient } from "../client/DaemonClient.js";
-import { resolveSecrets } from "../lib/SecretResolver.js";
 
 export async function TypeCommand(params) {
   const names = Array.isArray(params.name) ? params.name : [params.name];
@@ -9,14 +8,13 @@ export async function TypeCommand(params) {
     throw new Error(`Mismatched fields: ${names.length} name(s) but ${values.length} value(s)`);
   }
 
-  const resolved = resolveSecrets(values);
   const client = new DaemonClient();
 
   for (let i = 0; i < names.length; i++) {
     await client.send("type", {
       session: params.session,
       name: names[i],
-      value: resolved[i],
+      value: values[i],
       role: params.role
     });
   }

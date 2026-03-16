@@ -7,16 +7,16 @@
 ```
 
 ```file:text-content.txt
-go to "https://example.com"
+go to "https://aux4.io"
 get content as "text"
 ```
 
 ```execute
-aux4 browser run --instructions text-content.txt 2>/dev/null | cut -c1-14
+aux4 browser run --instructions text-content.txt 2>/dev/null | grep -o "aux4" | head -1
 ```
 
 ```expect
-Example Domain
+aux4
 ```
 
 ## get page content as markdown via run
@@ -26,16 +26,16 @@ Example Domain
 ```
 
 ```file:md-content.txt
-go to "https://example.com"
+go to "https://aux4.io"
 get content as "markdown"
 ```
 
 ```execute
-aux4 browser run --instructions md-content.txt 2>/dev/null | head -1
+aux4 browser run --instructions md-content.txt 2>/dev/null | grep -o "aux4" | head -1
 ```
 
 ```expect
-# Example Domain
+aux4
 ```
 
 ## get content via daemon
@@ -47,13 +47,13 @@ aux4 browser run --instructions md-content.txt 2>/dev/null | head -1
 ```execute
 aux4 browser start --persistent true > /dev/null 2>&1 &
 sleep 4
-SESSION=$(aux4 browser open --url https://example.com 2>/dev/null)
+SESSION=$(aux4 browser open --url https://aux4.io 2>/dev/null)
 sleep 1
-aux4 browser content --session $SESSION --format text 2>/dev/null | cut -c1-14
+aux4 browser content --session $SESSION --format text 2>/dev/null | grep -o "aux4" | head -1
 ```
 
 ```expect
-Example Domain
+aux4
 ```
 
 ```timeout

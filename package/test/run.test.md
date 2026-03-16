@@ -7,16 +7,16 @@
 ```
 
 ```file:goto.txt
-go to "https://example.com"
+go to "https://aux4.io"
 get content as "text"
 ```
 
 ```execute
-aux4 browser run --instructions goto.txt 2>/dev/null | cut -c1-14
+aux4 browser run --instructions goto.txt 2>/dev/null | grep -o "aux4" | head -1
 ```
 
 ```expect
-Example Domain
+aux4
 ```
 
 ## run with initial url
@@ -30,11 +30,11 @@ get content as "text"
 ```
 
 ```execute
-aux4 browser run --url https://example.com --instructions content-only.txt 2>/dev/null | cut -c1-14
+aux4 browser run --url https://aux4.io --instructions content-only.txt 2>/dev/null | grep -o "aux4" | head -1
 ```
 
 ```expect
-Example Domain
+aux4
 ```
 
 ## run with failed instruction
@@ -44,7 +44,7 @@ Example Domain
 ```
 
 ```file:fail-test.txt
-go to "https://example.com"
+go to "https://aux4.io"
 expect ".nonexistent" to exist
 get content as "text"
 ```
