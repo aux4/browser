@@ -1438,7 +1438,16 @@ if (!command) {
 const params = {};
 command.args.forEach((name, i) => {
   if (values[i] !== undefined && values[i] !== "") {
-    params[name] = values[i];
+    try {
+      const parsed = JSON.parse(values[i]);
+      if (Array.isArray(parsed)) {
+        params[name] = parsed;
+      } else {
+        params[name] = values[i];
+      }
+    } catch {
+      params[name] = values[i];
+    }
   }
 });
 
