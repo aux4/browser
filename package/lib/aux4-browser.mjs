@@ -1,7 +1,8 @@
+import { spawn } from 'node:child_process';
 import net from 'node:net';
-import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { webkit, firefox, chromium } from 'playwright';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -43,8 +44,7 @@ class ContentExtractor {
       .replace(/<li[^>]*>(.*?)<\/li>/gi, "- $1\n")
       .replace(/<br\s*\/?>/gi, "\n")
       .replace(/<p[^>]*>(.*?)<\/p>/gi, "$1\n\n")
-      .replace(/<img[^>]*alt="([^"]*)"[^>]*src="([^"]*)"[^>]*>/gi, "![$1]($2)")
-      .replace(/<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*>/gi, "![$2]($1)")
+      .replace(/<img[^>]*>/gi, "")
       .replace(/<[^>]+>/g, "")
       .replace(/&amp;/g, "&")
       .replace(/&lt;/g, "<")
@@ -134,7 +134,7 @@ class SessionManager {
     const context = await this.browser.newContext(contextOptions);
 
     const page = await context.newPage();
-    if (params.url && params.url !== "") await page.goto(params.url);
+    if (params.url && params.url !== "") await page.goto(params.url, { waitUntil: "networkidle" });
 
     const session = {
       id, context, pages: [page], activeTab: 0,
@@ -204,7 +204,7 @@ class SessionManager {
 
   async visit(sessionId, url) {
     const session = this.getSession(sessionId);
-    await session.pages[session.activeTab].goto(url);
+    await session.pages[session.activeTab].goto(url, { waitUntil: "networkidle" });
     return { status: "ok", url };
   }
 
@@ -487,7 +487,7 @@ class SessionManager {
   async newTab(sessionId, url) {
     const session = this.getSession(sessionId);
     const page = await session.context.newPage();
-    if (url && url !== "") await page.goto(url);
+    if (url && url !== "") await page.goto(url, { waitUntil: "networkidle" });
     session.pages.push(page);
     session.activeTab = session.pages.length - 1;
     return { status: "ok", tab: session.activeTab, tabs: session.pages.length };
@@ -647,9 +647,9 @@ class BrowserEngine {
   }
 }
 
-const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
-const SOCKET_PATH$1 = path.join(SOCKET_DIR, "browser.sock");
-const PID_PATH = path.join(SOCKET_DIR, "browser.pid");
+const SOCKET_DIR$1 = path.join(os.homedir(), ".aux4.config", "browser");
+const SOCKET_PATH$2 = path.join(SOCKET_DIR$1, "browser.sock");
+const PID_PATH$1 = path.join(SOCKET_DIR$1, "browser.pid");
 
 class DaemonServer {
   constructor(options = {}) {
@@ -663,8 +663,8 @@ class DaemonServer {
   }
 
   async start() {
-    fs.mkdirSync(SOCKET_DIR, { recursive: true });
-    if (fs.existsSync(SOCKET_PATH$1)) fs.unlinkSync(SOCKET_PATH$1);
+    fs.mkdirSync(SOCKET_DIR$1, { recursive: true });
+    if (fs.existsSync(SOCKET_PATH$2)) fs.unlinkSync(SOCKET_PATH$2);
 
     const launchOptions = {};
     if (this.channel) launchOptions.channel = this.channel;
@@ -690,13 +690,13 @@ class DaemonServer {
       socket.on("error", () => {});
     });
 
-    this.server.listen(SOCKET_PATH$1);
-    fs.writeFileSync(PID_PATH, process.pid.toString());
+    this.server.listen(SOCKET_PATH$2);
+    fs.writeFileSync(PID_PATH$1, process.pid.toString());
 
     process.on("SIGTERM", () => this.stop());
     process.on("SIGINT", () => this.stop());
 
-    console.log(JSON.stringify({ status: "started", socket: SOCKET_PATH$1, pid: process.pid }));
+    console.log(JSON.stringify({ status: "started", socket: SOCKET_PATH$2, pid: process.pid }));
   }
 
   async handleLine(socket, line) {
@@ -778,26 +778,94 @@ class DaemonServer {
     if (this.sessionManager) await this.sessionManager.closeAll();
     if (this.browser) await this.browser.close();
     if (this.server) this.server.close();
-    try { fs.unlinkSync(SOCKET_PATH$1); } catch {}
-    try { fs.unlinkSync(PID_PATH); } catch {}
+    try { fs.unlinkSync(SOCKET_PATH$2); } catch {}
+    try { fs.unlinkSync(PID_PATH$1); } catch {}
     if (!this.embedded) process.exit(0);
   }
 }
 
-async function StartCommand(params) {
-  const server = new DaemonServer({
-    maxSessions: parseInt(params.maxSessions) || 10,
-    persistent: params.persistent === "true" || params.persistent === true,
-    channel: params.channel || "",
-    browser: params.browser || ""
+const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
+const SOCKET_PATH$1 = path.join(SOCKET_DIR, "browser.sock");
+const PID_PATH = path.join(SOCKET_DIR, "browser.pid");
+
+function isDaemonRunning() {
+  try {
+    const pid = parseInt(fs.readFileSync(PID_PATH, "utf-8").trim());
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function waitForSocket(maxAttempts = 30) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const tryConnect = () => {
+      attempts++;
+      const socket = net.createConnection(SOCKET_PATH$1);
+      socket.on("connect", () => { socket.end(); resolve(); });
+      socket.on("error", () => {
+        if (attempts >= maxAttempts) {
+          reject(new Error("Daemon failed to start"));
+        } else {
+          setTimeout(tryConnect, 500);
+        }
+      });
+    };
+    tryConnect();
   });
-  await server.start();
+}
+
+async function StartCommand(params) {
+  // If running as the forked daemon child, start server directly
+  if (process.env.AUX4_BROWSER_DAEMON === "1") {
+    const server = new DaemonServer({
+      maxSessions: parseInt(params.maxSessions) || 10,
+      persistent: params.persistent === "true" || params.persistent === true,
+      channel: params.channel || "",
+      browser: params.browser || ""
+    });
+    await server.start();
+    return;
+  }
+
+  // Already running? Just report status
+  if (isDaemonRunning()) {
+    console.log(JSON.stringify({ status: "already_running" }));
+    return;
+  }
+
+  // Fork the daemon to the background
+  const child = spawn(process.execPath, process.argv.slice(1), {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, AUX4_BROWSER_DAEMON: "1" }
+  });
+  child.unref();
+
+  // Wait for the daemon socket to become available
+  await waitForSocket();
+
+  console.log(JSON.stringify({ status: "started", pid: child.pid }));
 }
 
 const SOCKET_PATH = path.join(os.homedir(), ".aux4.config", "browser", "browser.sock");
 
 class DaemonClient {
   async send(method, params = {}) {
+    try {
+      return await this._connect(method, params);
+    } catch (e) {
+      if (e.code === "ENOENT" || e.code === "ECONNREFUSED" || e.message?.includes("not running")) {
+        await this._autoStart();
+        return await this._connect(method, params);
+      }
+      throw e;
+    }
+  }
+
+  _connect(method, params) {
     return new Promise((resolve, reject) => {
       const socket = net.createConnection(SOCKET_PATH);
       let buffer = "";
@@ -822,12 +890,34 @@ class DaemonClient {
       });
 
       socket.on("error", (e) => {
-        if (e.code === "ENOENT" || e.code === "ECONNREFUSED") {
-          reject(new Error("Browser daemon is not running. Start it with: aux4 browser start"));
-        } else {
-          reject(e);
-        }
+        reject(e);
       });
+    });
+  }
+
+  async _autoStart() {
+    const child = spawn("aux4", ["browser", "start"], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.unref();
+
+    // Wait for the socket to become available
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        await this._ping();
+        return;
+      } catch {}
+    }
+    throw new Error("Failed to auto-start browser daemon");
+  }
+
+  _ping() {
+    return new Promise((resolve, reject) => {
+      const socket = net.createConnection(SOCKET_PATH);
+      socket.on("connect", () => { socket.end(); resolve(); });
+      socket.on("error", reject);
     });
   }
 }
@@ -984,9 +1074,10 @@ async function ContentCommand(params) {
 
 async function ScreenshotCommand(params) {
   const client = new DaemonClient();
+  const output = params.output ? path.resolve(params.output) : path.resolve("screenshot.png");
   const result = await client.send("screenshot", {
     session: params.session,
-    output: params.output,
+    output,
     fullPage: params.fullPage
   });
   console.log(result.path);
@@ -1036,19 +1127,21 @@ async function CookiesCommand(params) {
 
 async function DownloadCommand(params) {
   const client = new DaemonClient();
+  const output = params.output ? path.resolve(params.output) : undefined;
   const result = await client.send("download", {
     session: params.session,
     url: params.url,
-    output: params.output
+    output
   });
   console.log(result.path);
 }
 
 async function SavePdfCommand(params) {
   const client = new DaemonClient();
+  const output = params.output ? path.resolve(params.output) : path.resolve("page.pdf");
   const result = await client.send("save-pdf", {
     session: params.session,
-    output: params.output,
+    output,
     format: params.format,
     printBackground: params.printBackground
   });

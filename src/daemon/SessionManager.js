@@ -81,7 +81,7 @@ export class SessionManager {
     const context = await this.browser.newContext(contextOptions);
 
     const page = await context.newPage();
-    if (params.url && params.url !== "") await page.goto(params.url);
+    if (params.url && params.url !== "") await page.goto(params.url, { waitUntil: "networkidle" });
 
     const session = {
       id, context, pages: [page], activeTab: 0,
@@ -151,7 +151,7 @@ export class SessionManager {
 
   async visit(sessionId, url) {
     const session = this.getSession(sessionId);
-    await session.pages[session.activeTab].goto(url);
+    await session.pages[session.activeTab].goto(url, { waitUntil: "networkidle" });
     return { status: "ok", url };
   }
 
@@ -434,7 +434,7 @@ export class SessionManager {
   async newTab(sessionId, url) {
     const session = this.getSession(sessionId);
     const page = await session.context.newPage();
-    if (url && url !== "") await page.goto(url);
+    if (url && url !== "") await page.goto(url, { waitUntil: "networkidle" });
     session.pages.push(page);
     session.activeTab = session.pages.length - 1;
     return { status: "ok", tab: session.activeTab, tabs: session.pages.length };
