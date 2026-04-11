@@ -7,5 +7,5 @@ export async function WaitCommand(params) {
     selector: params.selector,
     timeout: params.timeout
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }

@@ -7,5 +7,5 @@ export async function ClickItemCommand(params) {
     item: params.item,
     selector: params.selector
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }

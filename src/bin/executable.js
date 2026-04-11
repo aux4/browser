@@ -31,6 +31,8 @@ import { PressCommand } from "../commands/PressCommand.js";
 import { ClearCommand } from "../commands/ClearCommand.js";
 import { UploadCommand } from "../commands/UploadCommand.js";
 import { SetScopeCommand, ClearScopeCommand } from "../commands/ScopeCommand.js";
+import { ComponentCommand } from "../commands/ComponentCommand.js";
+import { SnapshotCommand } from "../commands/SnapshotCommand.js";
 import { McpCommand } from "../commands/McpCommand.js";
 
 const args = process.argv.slice(2);
@@ -40,7 +42,7 @@ const values = args.slice(1);
 const commands = {
   start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
   visit:       { handler: VisitCommand,    args: ["session", "url"] },
@@ -72,6 +74,8 @@ const commands = {
   upload:      { handler: UploadCommand,   args: ["session", "name", "file"] },
   "set-scope": { handler: SetScopeCommand, args: ["session", "selector"] },
   "clear-scope": { handler: ClearScopeCommand, args: ["session"] },
+  component:   { handler: ComponentCommand, args: ["session", "type", "action", "name", "row", "col", "where", "item", "field", "fields", "value", "tab", "path", "title", "timeout"] },
+  snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format"] },
   "new-tab":   { handler: NewTabCommand,   args: ["session", "url"] },
   "switch-tab": { handler: SwitchTabCommand, args: ["session", "tab"] },
   "close-tab": { handler: CloseTabCommand, args: ["session", "tab"] },

@@ -124,6 +124,8 @@ export class DaemonServer {
       case "close-tab": return this.sessionManager.closeTab(params.session, parseInt(params.tab));
       case "list-tabs": return this.sessionManager.listTabs(params.session);
       case "execute": return this.sessionManager.execute(params.session, params.instructions);
+      case "component": return this.sessionManager.component(params.session, params);
+      case "snapshot": return this.sessionManager.snapshot(params.session, params);
       case "stop":
         setTimeout(() => this.stop(), 100);
         return { status: "stopping" };

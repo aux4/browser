@@ -2,26 +2,29 @@ import { DaemonClient } from "../client/DaemonClient.js";
 
 export async function NewTabCommand(params) {
   const client = new DaemonClient();
-  await client.send("new-tab", {
+  const result = await client.send("new-tab", {
     session: params.session,
     url: params.url
   });
+  console.log(JSON.stringify(result));
 }
 
 export async function SwitchTabCommand(params) {
   const client = new DaemonClient();
-  await client.send("switch-tab", {
+  const result = await client.send("switch-tab", {
     session: params.session,
     tab: params.tab
   });
+  console.log(JSON.stringify(result));
 }
 
 export async function CloseTabCommand(params) {
   const client = new DaemonClient();
-  await client.send("close-tab", {
+  const result = await client.send("close-tab", {
     session: params.session,
     tab: params.tab
   });
+  console.log(JSON.stringify(result));
 }
 
 export async function ListTabsCommand(params) {

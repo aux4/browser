@@ -8,7 +8,12 @@ export async function OpenCommand(params) {
     width: params.width,
     height: params.height,
     output: params.output,
-    video: params.video
+    video: params.video,
+    snapshot: params.snapshot
   });
-  console.log(result.sessionId);
+  if (result.snapshot) {
+    console.log(JSON.stringify(result));
+  } else {
+    console.log(result.sessionId);
+  }
 }

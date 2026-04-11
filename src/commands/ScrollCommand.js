@@ -7,5 +7,5 @@ export async function ScrollCommand(params) {
     direction: params.direction,
     amount: params.amount
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }

@@ -50,7 +50,7 @@ get content as "text"
 ```
 
 ```execute
-aux4 browser run --instructions fail-test.txt 2>/dev/null; echo "exit:$?"
+aux4 browser run --instructions fail-test.txt > /dev/null 2>&1; echo "exit:$?"
 ```
 
 ```expect

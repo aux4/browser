@@ -56,6 +56,340 @@ class ContentExtractor {
   }
 }
 
+/**
+ * SnapshotBuilder — builds a compact accessibility snapshot of the current page.
+ *
+ * Returns a lightweight structure an agent can consume to decide the next action
+ * without having to screenshot → read image → guess → click.
+ *
+ * Shape:
+ *   {
+ *     url, title,
+ *     elements: [{ ref, role, name, bounds, component? }, ...],
+ *     components: [{ ref, type, name, rows?, items?, fields? }, ...]
+ *   }
+ *
+ * `ref` is a 1-based index stable within this snapshot. Agents can pass it to
+ * commands via `--ref N` to act without re-resolving names.
+ *
+ * `mode`:
+ *   - "off"  → returns null
+ *   - "auto" → returns elements + components, elements truncated to ~50
+ *   - "full" → no truncation, includes text nodes
+ */
+
+const INTERACTIVE_ROLES = [
+  "button", "link", "textbox", "checkbox", "radio", "combobox", "listbox",
+  "menuitem", "tab", "switch", "searchbox", "slider", "spinbutton", "option"
+];
+
+const COMPONENT_ROLES = {
+  table: "table",
+  form: "form",
+  list: "list",
+  navigation: "nav",
+  menu: "menu",
+  dialog: "dialog",
+  tablist: "tablist",
+  tree: "tree"
+};
+
+class SnapshotBuilder {
+  static async build(page, mode = "auto") {
+    if (mode === "off") return null;
+
+    const full = mode === "full";
+
+    const data = await page.evaluate(({ interactiveRoles, componentRoles, full }) => {
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        if (style.visibility === "hidden" || style.display === "none" || style.opacity === "0") return false;
+        return true;
+      };
+
+      const implicitRole = (el) => {
+        const tag = el.tagName.toLowerCase();
+        switch (tag) {
+          case "a": return el.hasAttribute("href") ? "link" : null;
+          case "button": return "button";
+          case "input": {
+            const type = (el.getAttribute("type") || "text").toLowerCase();
+            if (type === "checkbox") return "checkbox";
+            if (type === "radio") return "radio";
+            if (type === "submit" || type === "button" || type === "reset") return "button";
+            if (type === "range") return "slider";
+            if (type === "number") return "spinbutton";
+            if (type === "search") return "searchbox";
+            return "textbox";
+          }
+          case "textarea": return "textbox";
+          case "select": return "combobox";
+          case "nav": return "navigation";
+          case "table": return "table";
+          case "form": return "form";
+          case "ul":
+          case "ol": return "list";
+          case "li": return "listitem";
+          case "dialog": return "dialog";
+          case "option": return "option";
+          default: return null;
+        }
+      };
+
+      const getRole = (el) => (el.getAttribute("role") || implicitRole(el));
+
+      const getName = (el) => {
+        const aria = el.getAttribute("aria-label");
+        if (aria) return aria.trim();
+        const labelledBy = el.getAttribute("aria-labelledby");
+        if (labelledBy) {
+          const ref = document.getElementById(labelledBy);
+          if (ref) return (ref.textContent || "").trim().slice(0, 120);
+        }
+        if (el.tagName.toLowerCase() === "input" || el.tagName.toLowerCase() === "textarea") {
+          if (el.id) {
+            const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+            if (label) return (label.textContent || "").trim().slice(0, 120);
+          }
+          const parentLabel = el.closest("label");
+          if (parentLabel) return (parentLabel.textContent || "").trim().slice(0, 120);
+          const placeholder = el.getAttribute("placeholder");
+          if (placeholder) return placeholder.trim();
+        }
+        const title = el.getAttribute("title");
+        if (title) return title.trim();
+        const text = (el.textContent || "").trim().replace(/\s+/g, " ");
+        return text.slice(0, 120);
+      };
+
+      const bounds = (el) => {
+        const r = el.getBoundingClientRect();
+        return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+      };
+
+      const all = Array.from(document.querySelectorAll("*"));
+      const elements = [];
+      const components = [];
+      let ref = 0;
+
+      for (const el of all) {
+        const role = getRole(el);
+        if (!role) continue;
+        if (!isVisible(el)) continue;
+
+        if (interactiveRoles.includes(role)) {
+          ref++;
+          const entry = { ref, role, name: getName(el), bounds: bounds(el) };
+          if (el.getAttribute("disabled") != null) entry.disabled = true;
+          elements.push(entry);
+        } else if (componentRoles[role]) {
+          ref++;
+          const type = componentRoles[role];
+          const comp = { ref, type, name: getName(el), bounds: bounds(el) };
+
+          if (type === "table") {
+            const rows = el.querySelectorAll("tr").length;
+            const headers = Array.from(el.querySelectorAll("thead th, tr:first-child th"))
+              .map(th => (th.textContent || "").trim())
+              .filter(Boolean);
+            comp.rows = rows;
+            if (headers.length) comp.headers = headers;
+          } else if (type === "list") {
+            comp.items = el.querySelectorAll(":scope > li, :scope > [role='listitem']").length;
+          } else if (type === "form") {
+            const fields = Array.from(el.querySelectorAll("input, textarea, select"))
+              .map(f => getName(f))
+              .filter(Boolean);
+            comp.fields = fields;
+          }
+
+          components.push(comp);
+        }
+      }
+
+      return {
+        url: location.href,
+        title: document.title,
+        elements: full ? elements : elements.slice(0, 50),
+        components,
+        truncated: !full && elements.length > 50 ? elements.length - 50 : 0
+      };
+    }, { interactiveRoles: INTERACTIVE_ROLES, componentRoles: COMPONENT_ROLES, full });
+
+    return data;
+  }
+
+  /**
+   * Render a snapshot as compact text (for logs, playbook output).
+   */
+  static render(snapshot) {
+    if (!snapshot) return "";
+    const lines = [`# ${snapshot.title}`, snapshot.url, ""];
+    if (snapshot.components.length) {
+      lines.push("## Components");
+      for (const c of snapshot.components) {
+        let line = `  [${c.ref}] ${c.type}`;
+        if (c.name) line += ` "${c.name}"`;
+        if (c.rows != null) line += ` (${c.rows} rows)`;
+        if (c.items != null) line += ` (${c.items} items)`;
+        if (c.fields?.length) line += ` fields: ${c.fields.join(", ")}`;
+        lines.push(line);
+      }
+      lines.push("");
+    }
+    lines.push("## Elements");
+    for (const e of snapshot.elements) {
+      lines.push(`  [${e.ref}] ${e.role} "${e.name}"${e.disabled ? " (disabled)" : ""}`);
+    }
+    if (snapshot.truncated) lines.push(`  ... and ${snapshot.truncated} more`);
+    return lines.join("\n");
+  }
+}
+
+/**
+ * ComponentResolver — resolves a (component-type, params) pair to a live
+ * Playwright locator using accessibility-first strategies.
+ *
+ * A "component" is a structural UI element (table, form, list, nav, menu,
+ * dialog, tab, tree, card). Each component has its own parameter schema; the
+ * resolver picks a strategy based on which params are present.
+ *
+ * Callers should not assume the returned value is a single element — it may
+ * be a multi-match locator depending on params. Use `.first()` or actions
+ * like `.click()` which accept their own timeouts.
+ */
+
+const isIndex = (v) => v != null && v !== "" && /^\d+$/.test(String(v));
+
+const byName = (base, role, name) => {
+  return name ? base.getByRole(role, { name }) : base.getByRole(role);
+};
+
+const resolveTable = async (base, p) => {
+  let table = byName(base, "table", p.name);
+  if (!p.row && !p.col && !p.where) return table;
+
+  let row;
+  if (isIndex(p.row)) {
+    // 1-based over all rows including header. Row 1 = header, row 2 = first data row.
+    row = table.getByRole("row").nth(parseInt(p.row) - 1);
+  } else if (p.row) {
+    row = table.getByRole("row").filter({ hasText: p.row }).first();
+  } else if (p.where) {
+    const [, value] = String(p.where).split("=", 2);
+    row = table.getByRole("row").filter({ hasText: value }).first();
+  } else {
+    row = table.getByRole("row");
+  }
+
+  if (!p.col) return row;
+
+  let colIndex;
+  if (isIndex(p.col)) {
+    colIndex = parseInt(p.col) - 1;
+  } else {
+    // Look up column index by header text.
+    const headers = await table.getByRole("row").first().getByRole("columnheader").allTextContents();
+    const normalized = headers.map(h => h.trim().toLowerCase());
+    const idx = normalized.indexOf(String(p.col).trim().toLowerCase());
+    if (idx < 0) {
+      throw new Error(`Column "${p.col}" not found. Available headers: ${headers.join(", ")}`);
+    }
+    colIndex = idx;
+  }
+
+  return row.getByRole("cell").nth(colIndex);
+};
+
+const resolveForm = (base, p) => {
+  let form = byName(base, "form", p.name);
+  if (p.field) {
+    return form.getByLabel(p.field).first();
+  }
+  return form;
+};
+
+const resolveList = (base, p) => {
+  let list = byName(base, "list", p.name);
+  if (!p.item) return list;
+  const items = list.getByRole("listitem");
+  if (isIndex(p.item)) return items.nth(parseInt(p.item) - 1);
+  return items.filter({ hasText: p.item }).first();
+};
+
+const resolveNav = (base, p) => {
+  let nav = byName(base, "navigation", p.name);
+  if (!p.item) return nav;
+  return nav.getByRole("link", { name: p.item }).first();
+};
+
+const resolveMenu = (base, p) => {
+  let menu = byName(base, "menu", p.name);
+  if (!p.item) return menu;
+  return menu.getByRole("menuitem", { name: p.item }).first();
+};
+
+const resolveDialog = (base, p) => {
+  return byName(base, "dialog", p.name);
+};
+
+const resolveTab = (base, p) => {
+  let tablist = byName(base, "tablist", p.name);
+  if (!p.tab) return tablist;
+  if (isIndex(p.tab)) return tablist.getByRole("tab").nth(parseInt(p.tab) - 1);
+  return tablist.getByRole("tab", { name: p.tab }).first();
+};
+
+const resolveTree = (base, p) => {
+  let tree = byName(base, "tree", p.name);
+  if (!p.path) return tree;
+  // Path like "A>B>C" — walk treeitems by label; return final item.
+  const parts = String(p.path).split(">").map(s => s.trim()).filter(Boolean);
+  let current = tree;
+  for (const part of parts) {
+    current = current.getByRole("treeitem", { name: part }).first();
+  }
+  return current;
+};
+
+const resolveCard = (base, p) => {
+  // No native ARIA "card" role. Match region/article with title.
+  const title = p.title || p.name;
+  if (title) {
+    const region = base.getByRole("article", { name: title }).or(base.getByRole("region", { name: title }));
+    return region.first();
+  }
+  return base.getByRole("article");
+};
+
+const RESOLVERS = {
+  table: resolveTable,
+  form: resolveForm,
+  list: resolveList,
+  nav: resolveNav,
+  menu: resolveMenu,
+  dialog: resolveDialog,
+  tab: resolveTab,
+  tree: resolveTree,
+  card: resolveCard
+};
+
+class ComponentResolver {
+  static async resolve(base, type, params = {}) {
+    const fn = RESOLVERS[type];
+    if (!fn) {
+      throw new Error(`Unknown component type: "${type}". Available: ${Object.keys(RESOLVERS).join(", ")}`);
+    }
+    return await fn(base, params);
+  }
+
+  static types() {
+    return Object.keys(RESOLVERS);
+  }
+}
+
 class SessionManager {
   constructor(browser, options = {}) {
     this.browser = browser;
@@ -136,15 +470,31 @@ class SessionManager {
     const page = await context.newPage();
     if (params.url && params.url !== "") await page.goto(params.url, { waitUntil: "networkidle" });
 
+    const snapshotMode = params.snapshot || "off";
     const session = {
       id, context, pages: [page], activeTab: 0,
       timeout, createdAt: Date.now(), lastActivity: Date.now(),
       timer: setTimeout(() => this.close(id), timeout),
-      outputDir, videoMode, hadError: false
+      outputDir, videoMode, hadError: false, snapshotMode
     };
 
     this.sessions.set(id, session);
-    return { sessionId: id };
+    const result = { sessionId: id };
+    await this._attachSnapshot(session, result);
+    return result;
+  }
+
+  async _attachSnapshot(session, result, overrideMode) {
+    const mode = overrideMode || session.snapshotMode;
+    if (!mode || mode === "off") return result;
+    try {
+      const page = session.pages[session.activeTab];
+      const snapshot = await SnapshotBuilder.build(page, mode);
+      if (snapshot) result.snapshot = snapshot;
+    } catch (e) {
+      result.snapshotError = e.message;
+    }
+    return result;
   }
 
   async screenshotOnError(session) {
@@ -205,28 +555,28 @@ class SessionManager {
   async visit(sessionId, url) {
     const session = this.getSession(sessionId);
     await session.pages[session.activeTab].goto(url, { waitUntil: "networkidle" });
-    return { status: "ok", url };
+    return this._attachSnapshot(session, { status: "ok", url });
   }
 
   async back(sessionId) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.goBack();
-    return { status: "ok", url: page.url() };
+    return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async forward(sessionId) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.goForward();
-    return { status: "ok", url: page.url() };
+    return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async reload(sessionId) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.reload();
-    return { status: "ok", url: page.url() };
+    return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async click(sessionId, params) {
@@ -234,21 +584,21 @@ class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "button";
     await base.getByRole(role, { name: params.name }).click({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async clickSelector(sessionId, params) {
     const session = this.getSession(sessionId);
     const base = this.getBase(session);
     await base.locator(params.selector).first().click({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async clickText(sessionId, params) {
     const session = this.getSession(sessionId);
     const base = this.getBase(session);
     await base.getByText(params.text, { exact: false }).first().click({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async type(sessionId, params) {
@@ -256,7 +606,7 @@ class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).fill(params.value);
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async scroll(sessionId, params) {
@@ -271,7 +621,7 @@ class SessionManager {
       const dy = params.direction === "up" ? -amount : amount;
       await page.evaluate((d) => window.scrollBy(0, d), dy);
     }
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async content(sessionId, params) {
@@ -391,7 +741,7 @@ class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "combobox";
     await base.getByRole(role, { name: params.name }).selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async check(sessionId, params) {
@@ -399,7 +749,7 @@ class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async uncheck(sessionId, params) {
@@ -407,7 +757,7 @@ class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async hover(sessionId, params) {
@@ -415,14 +765,14 @@ class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "button";
     await base.getByRole(role, { name: params.name }).hover({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async press(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.keyboard.press(params.key);
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async clear(sessionId, params) {
@@ -539,7 +889,7 @@ class SessionManager {
     } else {
       await items.filter({ hasText: item }).first().click({ timeout });
     }
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async expectList(sessionId, params) {
@@ -575,6 +925,97 @@ class SessionManager {
       result.push(text ? text.trim() : "");
     }
     return result;
+  }
+
+  async component(sessionId, params) {
+    const session = this.getSession(sessionId);
+    const base = this.getBase(session);
+    const timeout = parseInt(params.timeout) || 5000;
+    const type = params.type;
+    if (!type) throw new Error("component: --type is required");
+
+    const { type: _t, action: _a, timeout: _to, ...componentParams } = params;
+    const locator = await ComponentResolver.resolve(base, type, componentParams);
+    const action = params.action || "locate";
+
+    switch (action) {
+      case "locate": {
+        const count = await locator.count();
+        const first = count > 0 ? await locator.first().boundingBox().catch(() => null) : null;
+        return { status: "ok", type, count, bounds: first };
+      }
+      case "click": {
+        await locator.first().click({ timeout });
+        return this._attachSnapshot(session, { status: "ok" });
+      }
+      case "hover": {
+        await locator.first().hover({ timeout });
+        return this._attachSnapshot(session, { status: "ok" });
+      }
+      case "read": {
+        // Return textual contents of the resolved locator(s).
+        const count = await locator.count();
+        const texts = [];
+        for (let i = 0; i < count; i++) {
+          const t = await locator.nth(i).textContent().catch(() => "");
+          texts.push((t || "").trim().replace(/\s+/g, " "));
+        }
+        return { status: "ok", type, count, text: texts.length === 1 ? texts[0] : texts };
+      }
+      case "count": {
+        // For container components with no item/row/col specified, count contents.
+        let target = locator;
+        if (type === "list" && !params.item) {
+          target = locator.getByRole("listitem");
+        } else if (type === "table" && !params.row && !params.col) {
+          target = locator.getByRole("row");
+        } else if (type === "nav" && !params.item) {
+          target = locator.getByRole("link");
+        } else if (type === "menu" && !params.item) {
+          target = locator.getByRole("menuitem");
+        } else if (type === "tab" && !params.tab) {
+          target = locator.getByRole("tab");
+        }
+        const count = await target.count();
+        return { status: "ok", type, count };
+      }
+      case "bounds": {
+        const box = await locator.first().boundingBox({ timeout }).catch(() => null);
+        return { status: "ok", type, bounds: box };
+      }
+      case "fill": {
+        // For form components: fill a single field or a JSON map of fields.
+        if (params.fields) {
+          const fields = typeof params.fields === "string" ? JSON.parse(params.fields) : params.fields;
+          for (const [name, value] of Object.entries(fields)) {
+            await locator.getByLabel(name).fill(String(value), { timeout });
+          }
+          return this._attachSnapshot(session, { status: "ok", filled: Object.keys(fields).length });
+        }
+        if (params.value != null) {
+          await locator.fill(String(params.value), { timeout });
+          return this._attachSnapshot(session, { status: "ok" });
+        }
+        throw new Error("component fill: provide --fields (json) or --value");
+      }
+      case "scroll": {
+        await locator.first().scrollIntoViewIfNeeded({ timeout });
+        return this._attachSnapshot(session, { status: "ok" });
+      }
+      default:
+        throw new Error(`Unknown component action: "${action}". Use: locate, click, hover, read, count, bounds, fill, scroll`);
+    }
+  }
+
+  async snapshot(sessionId, params = {}) {
+    const session = this.getSession(sessionId);
+    const mode = params.mode || "auto";
+    const page = session.pages[session.activeTab];
+    const snapshot = await SnapshotBuilder.build(page, mode);
+    if (params.format === "text") {
+      return { status: "ok", text: SnapshotBuilder.render(snapshot) };
+    }
+    return { status: "ok", snapshot };
   }
 
   async execute(sessionId, instructions) {
@@ -766,6 +1207,8 @@ class DaemonServer {
       case "close-tab": return this.sessionManager.closeTab(params.session, parseInt(params.tab));
       case "list-tabs": return this.sessionManager.listTabs(params.session);
       case "execute": return this.sessionManager.execute(params.session, params.instructions);
+      case "component": return this.sessionManager.component(params.session, params);
+      case "snapshot": return this.sessionManager.snapshot(params.session, params);
       case "stop":
         setTimeout(() => this.stop(), 100);
         return { status: "stopping" };
@@ -924,7 +1367,8 @@ class DaemonClient {
 
 async function StopCommand() {
   const client = new DaemonClient();
-  await client.send("stop");
+  const result = await client.send("stop");
+  console.log(JSON.stringify(result));
 }
 
 async function OpenCommand(params) {
@@ -935,14 +1379,20 @@ async function OpenCommand(params) {
     width: params.width,
     height: params.height,
     output: params.output,
-    video: params.video
+    video: params.video,
+    snapshot: params.snapshot
   });
-  console.log(result.sessionId);
+  if (result.snapshot) {
+    console.log(JSON.stringify(result));
+  } else {
+    console.log(result.sessionId);
+  }
 }
 
 async function CloseCommand(params) {
   const client = new DaemonClient();
-  await client.send("close", { session: params.session });
+  const result = await client.send("close", { session: params.session });
+  console.log(JSON.stringify(result));
 }
 
 async function ListCommand() {
@@ -953,72 +1403,76 @@ async function ListCommand() {
 
 async function VisitCommand(params) {
   const client = new DaemonClient();
-  await client.send("visit", { session: params.session, url: params.url });
+  const result = await client.send("visit", { session: params.session, url: params.url });
+  console.log(JSON.stringify(result));
 }
 
 async function BackCommand(params) {
   const client = new DaemonClient();
-  await client.send("back", { session: params.session });
+  const result = await client.send("back", { session: params.session });
+  console.log(JSON.stringify(result));
 }
 
 async function ForwardCommand(params) {
   const client = new DaemonClient();
-  await client.send("forward", { session: params.session });
+  const result = await client.send("forward", { session: params.session });
+  console.log(JSON.stringify(result));
 }
 
 async function ReloadCommand(params) {
   const client = new DaemonClient();
-  await client.send("reload", { session: params.session });
+  const result = await client.send("reload", { session: params.session });
+  console.log(JSON.stringify(result));
 }
 
 async function ClickCommand(params) {
   const client = new DaemonClient();
-  await client.send("click", {
+  const result = await client.send("click", {
     session: params.session,
     name: params.name,
     role: params.role
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }
 
 async function ClickSelectorCommand(params) {
   const client = new DaemonClient();
-  await client.send("click-selector", {
+  const result = await client.send("click-selector", {
     session: params.session,
     selector: params.selector
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }
 
 async function ClickTextCommand(params) {
   const client = new DaemonClient();
-  await client.send("click-text", {
+  const result = await client.send("click-text", {
     session: params.session,
     text: params.text
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }
 
 async function ClickItemCommand(params) {
   const client = new DaemonClient();
-  await client.send("click-item", {
+  const result = await client.send("click-item", {
     session: params.session,
     item: params.item,
     selector: params.selector
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }
 
 async function ExpectListCommand(params) {
   const client = new DaemonClient();
-  await client.send("expect-list", {
+  const result = await client.send("expect-list", {
     session: params.session,
     assertion: params.assertion,
     expected: params.expected,
     selector: params.selector,
     timeout: params.timeout
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }
 
 async function GetItemsCommand(params) {
@@ -1042,24 +1496,26 @@ async function TypeCommand(params) {
 
   const client = new DaemonClient();
 
+  let result;
   for (let i = 0; i < names.length; i++) {
-    await client.send("type", {
+    result = await client.send("type", {
       session: params.session,
       name: names[i],
       value: values[i],
       role: params.role
     });
   }
+  console.log(JSON.stringify(result));
 }
 
 async function ScrollCommand(params) {
   const client = new DaemonClient();
-  await client.send("scroll", {
+  const result = await client.send("scroll", {
     session: params.session,
     direction: params.direction,
     amount: params.amount
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }
 
 async function ContentCommand(params) {
@@ -1085,12 +1541,12 @@ async function ScreenshotCommand(params) {
 
 async function WaitCommand(params) {
   const client = new DaemonClient();
-  await client.send("wait", {
+  const result = await client.send("wait", {
     session: params.session,
     selector: params.selector,
     timeout: params.timeout
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }
 
 async function EvalCommand(params) {
@@ -1106,13 +1562,14 @@ async function EvalCommand(params) {
 
 async function ExpectCommand(params) {
   const client = new DaemonClient();
-  await client.send("expect", {
+  const result = await client.send("expect", {
     session: params.session,
     selector: params.selector,
     assertion: params.assertion,
     expected: params.expected || "",
     timeout: params.timeout || "5000"
   });
+  console.log(JSON.stringify(result));
 }
 
 async function CookiesCommand(params) {
@@ -1150,26 +1607,29 @@ async function SavePdfCommand(params) {
 
 async function NewTabCommand(params) {
   const client = new DaemonClient();
-  await client.send("new-tab", {
+  const result = await client.send("new-tab", {
     session: params.session,
     url: params.url
   });
+  console.log(JSON.stringify(result));
 }
 
 async function SwitchTabCommand(params) {
   const client = new DaemonClient();
-  await client.send("switch-tab", {
+  const result = await client.send("switch-tab", {
     session: params.session,
     tab: params.tab
   });
+  console.log(JSON.stringify(result));
 }
 
 async function CloseTabCommand(params) {
   const client = new DaemonClient();
-  await client.send("close-tab", {
+  const result = await client.send("close-tab", {
     session: params.session,
     tab: params.tab
   });
+  console.log(JSON.stringify(result));
 }
 
 async function ListTabsCommand(params) {
@@ -1182,80 +1642,125 @@ async function ListTabsCommand(params) {
 
 async function SelectCommand(params) {
   const client = new DaemonClient();
-  await client.send("select", {
+  const result = await client.send("select", {
     session: params.session,
     name: params.name,
     value: params.value,
     role: params.role
   });
+  console.log(JSON.stringify(result));
 }
 
 async function CheckCommand(params) {
   const client = new DaemonClient();
-  await client.send("check", {
+  const result = await client.send("check", {
     session: params.session,
     name: params.name,
     role: params.role
   });
+  console.log(JSON.stringify(result));
 }
 
 async function UncheckCommand(params) {
   const client = new DaemonClient();
-  await client.send("uncheck", {
+  const result = await client.send("uncheck", {
     session: params.session,
     name: params.name,
     role: params.role
   });
+  console.log(JSON.stringify(result));
 }
 
 async function HoverCommand(params) {
   const client = new DaemonClient();
-  await client.send("hover", {
+  const result = await client.send("hover", {
     session: params.session,
     name: params.name,
     role: params.role
   });
+  console.log(JSON.stringify(result));
 }
 
 async function PressCommand(params) {
   const client = new DaemonClient();
-  await client.send("press", {
+  const result = await client.send("press", {
     session: params.session,
     key: params.key
   });
+  console.log(JSON.stringify(result));
 }
 
 async function ClearCommand(params) {
   const client = new DaemonClient();
-  await client.send("clear", {
+  const result = await client.send("clear", {
     session: params.session,
     name: params.name,
     role: params.role
   });
+  console.log(JSON.stringify(result));
 }
 
 async function UploadCommand(params) {
   const client = new DaemonClient();
-  await client.send("upload", {
+  const result = await client.send("upload", {
     session: params.session,
     name: params.name,
     file: params.file
   });
+  console.log(JSON.stringify(result));
 }
 
 async function SetScopeCommand(params) {
   const client = new DaemonClient();
-  await client.send("set-scope", {
+  const result = await client.send("set-scope", {
     session: params.session,
     selector: params.selector
   });
+  console.log(JSON.stringify(result));
 }
 
 async function ClearScopeCommand(params) {
   const client = new DaemonClient();
-  await client.send("clear-scope", {
+  const result = await client.send("clear-scope", {
     session: params.session
   });
+  console.log(JSON.stringify(result));
+}
+
+async function ComponentCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("component", {
+    session: params.session,
+    type: params.type,
+    action: params.action,
+    name: params.name,
+    row: params.row,
+    col: params.col,
+    where: params.where,
+    item: params.item,
+    field: params.field,
+    fields: params.fields,
+    value: params.value,
+    tab: params.tab,
+    path: params.path,
+    title: params.title,
+    timeout: params.timeout
+  });
+  console.log(JSON.stringify(result));
+}
+
+async function SnapshotCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("snapshot", {
+    session: params.session,
+    mode: params.mode,
+    format: params.format
+  });
+  if (params.format === "text" && result.text != null) {
+    console.log(result.text);
+  } else {
+    console.log(JSON.stringify(result));
+  }
 }
 
 async function McpCommand() {
@@ -1483,7 +1988,7 @@ const values = args.slice(1);
 const commands = {
   start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
   visit:       { handler: VisitCommand,    args: ["session", "url"] },
@@ -1515,6 +2020,8 @@ const commands = {
   upload:      { handler: UploadCommand,   args: ["session", "name", "file"] },
   "set-scope": { handler: SetScopeCommand, args: ["session", "selector"] },
   "clear-scope": { handler: ClearScopeCommand, args: ["session"] },
+  component:   { handler: ComponentCommand, args: ["session", "type", "action", "name", "row", "col", "where", "item", "field", "fields", "value", "tab", "path", "title", "timeout"] },
+  snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format"] },
   "new-tab":   { handler: NewTabCommand,   args: ["session", "url"] },
   "switch-tab": { handler: SwitchTabCommand, args: ["session", "tab"] },
   "close-tab": { handler: CloseTabCommand, args: ["session", "tab"] },

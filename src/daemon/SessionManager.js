@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { ContentExtractor } from "../lib/ContentExtractor.js";
+import { SnapshotBuilder } from "../lib/SnapshotBuilder.js";
+import { ComponentResolver } from "../lib/ComponentResolver.js";
 
 export class SessionManager {
   constructor(browser, options = {}) {
@@ -83,15 +85,31 @@ export class SessionManager {
     const page = await context.newPage();
     if (params.url && params.url !== "") await page.goto(params.url, { waitUntil: "networkidle" });
 
+    const snapshotMode = params.snapshot || "off";
     const session = {
       id, context, pages: [page], activeTab: 0,
       timeout, createdAt: Date.now(), lastActivity: Date.now(),
       timer: setTimeout(() => this.close(id), timeout),
-      outputDir, videoMode, hadError: false
+      outputDir, videoMode, hadError: false, snapshotMode
     };
 
     this.sessions.set(id, session);
-    return { sessionId: id };
+    const result = { sessionId: id };
+    await this._attachSnapshot(session, result);
+    return result;
+  }
+
+  async _attachSnapshot(session, result, overrideMode) {
+    const mode = overrideMode || session.snapshotMode;
+    if (!mode || mode === "off") return result;
+    try {
+      const page = session.pages[session.activeTab];
+      const snapshot = await SnapshotBuilder.build(page, mode);
+      if (snapshot) result.snapshot = snapshot;
+    } catch (e) {
+      result.snapshotError = e.message;
+    }
+    return result;
   }
 
   async screenshotOnError(session) {
@@ -152,28 +170,28 @@ export class SessionManager {
   async visit(sessionId, url) {
     const session = this.getSession(sessionId);
     await session.pages[session.activeTab].goto(url, { waitUntil: "networkidle" });
-    return { status: "ok", url };
+    return this._attachSnapshot(session, { status: "ok", url });
   }
 
   async back(sessionId) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.goBack();
-    return { status: "ok", url: page.url() };
+    return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async forward(sessionId) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.goForward();
-    return { status: "ok", url: page.url() };
+    return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async reload(sessionId) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.reload();
-    return { status: "ok", url: page.url() };
+    return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async click(sessionId, params) {
@@ -181,21 +199,21 @@ export class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "button";
     await base.getByRole(role, { name: params.name }).click({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async clickSelector(sessionId, params) {
     const session = this.getSession(sessionId);
     const base = this.getBase(session);
     await base.locator(params.selector).first().click({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async clickText(sessionId, params) {
     const session = this.getSession(sessionId);
     const base = this.getBase(session);
     await base.getByText(params.text, { exact: false }).first().click({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async type(sessionId, params) {
@@ -203,7 +221,7 @@ export class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).fill(params.value);
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async scroll(sessionId, params) {
@@ -218,7 +236,7 @@ export class SessionManager {
       const dy = params.direction === "up" ? -amount : amount;
       await page.evaluate((d) => window.scrollBy(0, d), dy);
     }
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async content(sessionId, params) {
@@ -338,7 +356,7 @@ export class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "combobox";
     await base.getByRole(role, { name: params.name }).selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async check(sessionId, params) {
@@ -346,7 +364,7 @@ export class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async uncheck(sessionId, params) {
@@ -354,7 +372,7 @@ export class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async hover(sessionId, params) {
@@ -362,14 +380,14 @@ export class SessionManager {
     const base = this.getBase(session);
     const role = params.role || "button";
     await base.getByRole(role, { name: params.name }).hover({ timeout: parseInt(params.timeout) || 5000 });
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async press(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.keyboard.press(params.key);
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async clear(sessionId, params) {
@@ -486,7 +504,7 @@ export class SessionManager {
     } else {
       await items.filter({ hasText: item }).first().click({ timeout });
     }
-    return { status: "ok" };
+    return this._attachSnapshot(session, { status: "ok" });
   }
 
   async expectList(sessionId, params) {
@@ -522,6 +540,97 @@ export class SessionManager {
       result.push(text ? text.trim() : "");
     }
     return result;
+  }
+
+  async component(sessionId, params) {
+    const session = this.getSession(sessionId);
+    const base = this.getBase(session);
+    const timeout = parseInt(params.timeout) || 5000;
+    const type = params.type;
+    if (!type) throw new Error("component: --type is required");
+
+    const { type: _t, action: _a, timeout: _to, ...componentParams } = params;
+    const locator = await ComponentResolver.resolve(base, type, componentParams);
+    const action = params.action || "locate";
+
+    switch (action) {
+      case "locate": {
+        const count = await locator.count();
+        const first = count > 0 ? await locator.first().boundingBox().catch(() => null) : null;
+        return { status: "ok", type, count, bounds: first };
+      }
+      case "click": {
+        await locator.first().click({ timeout });
+        return this._attachSnapshot(session, { status: "ok" });
+      }
+      case "hover": {
+        await locator.first().hover({ timeout });
+        return this._attachSnapshot(session, { status: "ok" });
+      }
+      case "read": {
+        // Return textual contents of the resolved locator(s).
+        const count = await locator.count();
+        const texts = [];
+        for (let i = 0; i < count; i++) {
+          const t = await locator.nth(i).textContent().catch(() => "");
+          texts.push((t || "").trim().replace(/\s+/g, " "));
+        }
+        return { status: "ok", type, count, text: texts.length === 1 ? texts[0] : texts };
+      }
+      case "count": {
+        // For container components with no item/row/col specified, count contents.
+        let target = locator;
+        if (type === "list" && !params.item) {
+          target = locator.getByRole("listitem");
+        } else if (type === "table" && !params.row && !params.col) {
+          target = locator.getByRole("row");
+        } else if (type === "nav" && !params.item) {
+          target = locator.getByRole("link");
+        } else if (type === "menu" && !params.item) {
+          target = locator.getByRole("menuitem");
+        } else if (type === "tab" && !params.tab) {
+          target = locator.getByRole("tab");
+        }
+        const count = await target.count();
+        return { status: "ok", type, count };
+      }
+      case "bounds": {
+        const box = await locator.first().boundingBox({ timeout }).catch(() => null);
+        return { status: "ok", type, bounds: box };
+      }
+      case "fill": {
+        // For form components: fill a single field or a JSON map of fields.
+        if (params.fields) {
+          const fields = typeof params.fields === "string" ? JSON.parse(params.fields) : params.fields;
+          for (const [name, value] of Object.entries(fields)) {
+            await locator.getByLabel(name).fill(String(value), { timeout });
+          }
+          return this._attachSnapshot(session, { status: "ok", filled: Object.keys(fields).length });
+        }
+        if (params.value != null) {
+          await locator.fill(String(params.value), { timeout });
+          return this._attachSnapshot(session, { status: "ok" });
+        }
+        throw new Error("component fill: provide --fields (json) or --value");
+      }
+      case "scroll": {
+        await locator.first().scrollIntoViewIfNeeded({ timeout });
+        return this._attachSnapshot(session, { status: "ok" });
+      }
+      default:
+        throw new Error(`Unknown component action: "${action}". Use: locate, click, hover, read, count, bounds, fill, scroll`);
+    }
+  }
+
+  async snapshot(sessionId, params = {}) {
+    const session = this.getSession(sessionId);
+    const mode = params.mode || "auto";
+    const page = session.pages[session.activeTab];
+    const snapshot = await SnapshotBuilder.build(page, mode);
+    if (params.format === "text") {
+      return { status: "ok", text: SnapshotBuilder.render(snapshot) };
+    }
+    return { status: "ok", snapshot };
   }
 
   async execute(sessionId, instructions) {

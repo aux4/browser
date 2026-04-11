@@ -6,5 +6,5 @@ export async function ClickSelectorCommand(params) {
     session: params.session,
     selector: params.selector
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }

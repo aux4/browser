@@ -10,12 +10,14 @@ export async function TypeCommand(params) {
 
   const client = new DaemonClient();
 
+  let result;
   for (let i = 0; i < names.length; i++) {
-    await client.send("type", {
+    result = await client.send("type", {
       session: params.session,
       name: names[i],
       value: values[i],
       role: params.role
     });
   }
+  console.log(JSON.stringify(result));
 }

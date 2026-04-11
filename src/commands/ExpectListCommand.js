@@ -9,5 +9,5 @@ export async function ExpectListCommand(params) {
     selector: params.selector,
     timeout: params.timeout
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }

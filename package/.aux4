@@ -76,7 +76,7 @@
         {
           "name": "open",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video)"
+            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot)"
           ],
           "help": {
             "text": "Open a new browser session",
@@ -109,6 +109,11 @@
               {
                 "name": "video",
                 "text": "Video recording mode: on, off, retain-on-failure",
+                "default": "off"
+              },
+              {
+                "name": "snapshot",
+                "text": "Auto-snapshot mode on actions: off, auto, full",
                 "default": "off"
               }
             ]
@@ -1002,6 +1007,118 @@
                 "name": "browser",
                 "text": "Browser engine: chromium, firefox, webkit",
                 "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "component",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs component values(session,type,action,name,row,col,where,item,field,fields,value,tab,path,title,timeout)"
+          ],
+          "help": {
+            "text": "Interact with a UI component structurally (table, form, list, nav, menu, dialog, tab, tree, card)",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "type",
+                "text": "Component type: table, form, list, nav, menu, dialog, tab, tree, card",
+                "required": true
+              },
+              {
+                "name": "action",
+                "text": "Action: locate, click, hover, read, count, bounds, fill, scroll",
+                "default": "locate"
+              },
+              {
+                "name": "name",
+                "text": "Accessible name of the component",
+                "default": ""
+              },
+              {
+                "name": "row",
+                "text": "Table row (1-based index or matching text)",
+                "default": ""
+              },
+              {
+                "name": "col",
+                "text": "Table column (1-based index or header name)",
+                "default": ""
+              },
+              {
+                "name": "where",
+                "text": "Row filter for table, e.g. \"Name=Acme\"",
+                "default": ""
+              },
+              {
+                "name": "item",
+                "text": "List item (1-based index or text)",
+                "default": ""
+              },
+              {
+                "name": "field",
+                "text": "Form field label",
+                "default": ""
+              },
+              {
+                "name": "fields",
+                "text": "JSON map of form fields to fill",
+                "default": ""
+              },
+              {
+                "name": "value",
+                "text": "Value for fill action",
+                "default": ""
+              },
+              {
+                "name": "tab",
+                "text": "Tab index or name (for tab component)",
+                "default": ""
+              },
+              {
+                "name": "path",
+                "text": "Tree path, e.g. \"Root>Child>Leaf\"",
+                "default": ""
+              },
+              {
+                "name": "title",
+                "text": "Card title",
+                "default": ""
+              },
+              {
+                "name": "timeout",
+                "text": "Timeout in milliseconds",
+                "default": "5000"
+              }
+            ]
+          }
+        },
+        {
+          "name": "snapshot",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs snapshot values(session,mode,format)"
+          ],
+          "help": {
+            "text": "Return an accessibility snapshot of the current page",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "mode",
+                "text": "Snapshot mode: auto, full",
+                "default": "auto"
+              },
+              {
+                "name": "format",
+                "text": "Output format: json, text",
+                "default": "json"
               }
             ]
           }

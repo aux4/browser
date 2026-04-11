@@ -6,5 +6,5 @@ export async function ClickTextCommand(params) {
     session: params.session,
     text: params.text
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }

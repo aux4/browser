@@ -7,5 +7,5 @@ export async function ClickCommand(params) {
     name: params.name,
     role: params.role
   });
-  // No output on success
+  console.log(JSON.stringify(result));
 }
