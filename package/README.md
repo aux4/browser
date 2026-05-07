@@ -2,10 +2,10 @@
 
 Headless browser automation with daemon architecture and multi-agent session management.
 
-## Install
+## Installation
 
 ```bash
-aux4 install aux4/browser
+aux4 aux4 pkger install aux4/browser
 npx playwright install chromium
 ```
 
