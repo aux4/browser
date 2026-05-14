@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.15",
+  "version": "1.0.14",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -44,7 +44,7 @@
               {
                 "name": "maxSessions",
                 "text": "Maximum concurrent sessions",
-                "default": "10"
+                "default": "20"
               },
               {
                 "name": "persistent",
@@ -216,7 +216,7 @@
         {
           "name": "click",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs click values(session,name,role)"
+            "node ${packageDir}/lib/aux4-browser.mjs click values(session,name,role,index)"
           ],
           "help": {
             "text": "Click an element",
@@ -235,6 +235,11 @@
                 "name": "role",
                 "text": "ARIA role",
                 "default": "button"
+              },
+              {
+                "name": "index",
+                "text": "1-based index when multiple elements match",
+                "default": ""
               }
             ]
           }
@@ -263,7 +268,7 @@
         {
           "name": "click-text",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs click-text values(session,text)"
+            "node ${packageDir}/lib/aux4-browser.mjs click-text values(session,text,index)"
           ],
           "help": {
             "text": "Click an element by its text content",
@@ -277,6 +282,11 @@
                 "name": "text",
                 "text": "Text content to find and click",
                 "required": true
+              },
+              {
+                "name": "index",
+                "text": "1-based index when multiple elements match",
+                "default": ""
               }
             ]
           }
@@ -317,7 +327,7 @@
         {
           "name": "scroll",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs scroll values(session,direction,amount)"
+            "node ${packageDir}/lib/aux4-browser.mjs scroll values(session,direction,amount,to)"
           ],
           "help": {
             "text": "Scroll the page",
@@ -336,6 +346,11 @@
                 "name": "amount",
                 "text": "Scroll amount in pixels",
                 "default": "500"
+              },
+              {
+                "name": "to",
+                "text": "Scroll to element by text content",
+                "default": ""
               }
             ]
           }
@@ -452,7 +467,7 @@
         {
           "name": "press",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs press values(session,key)"
+            "node ${packageDir}/lib/aux4-browser.mjs press values(session,key,selector)"
           ],
           "help": {
             "text": "Press a keyboard key",
@@ -466,6 +481,11 @@
                 "name": "key",
                 "text": "Key to press (e.g. Enter, Tab, Escape, ArrowDown)",
                 "required": true
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector to focus before pressing key",
+                "default": ""
               }
             ]
           }
@@ -876,6 +896,27 @@
               {
                 "name": "session",
                 "text": "Session ID",
+                "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "set-snapshot",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs set-snapshot values(session,mode)"
+          ],
+          "help": {
+            "text": "Set snapshot mode for the session",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "mode",
+                "text": "Snapshot mode: off, auto, full",
                 "required": true
               }
             ]

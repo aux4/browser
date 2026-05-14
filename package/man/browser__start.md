@@ -5,10 +5,10 @@ Start the browser daemon.
 ## Usage
 
 ```
-aux4 browser start [--maxSessions 10] [--persistent false]
+aux4 browser start [--maxSessions 20] [--persistent false]
 ```
 
 ## Options
 
-- `--maxSessions` — Maximum concurrent sessions (default: 10)
+- `--maxSessions` — Maximum concurrent sessions (default: 20)
 - `--persistent` — Keep daemon running when all sessions close (default: false)

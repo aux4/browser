@@ -42,7 +42,7 @@ export async function StartCommand(params) {
   // If running as the forked daemon child, start server directly
   if (process.env.AUX4_BROWSER_DAEMON === "1") {
     const server = new DaemonServer({
-      maxSessions: parseInt(params.maxSessions) || 10,
+      maxSessions: parseInt(params.maxSessions) || 20,
       persistent: params.persistent === "true" || params.persistent === true,
       channel: params.channel || "",
       browser: params.browser || ""

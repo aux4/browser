@@ -11,7 +11,7 @@ const PID_PATH = path.join(SOCKET_DIR, "browser.pid");
 
 export class DaemonServer {
   constructor(options = {}) {
-    this.maxSessions = options.maxSessions || 10;
+    this.maxSessions = options.maxSessions || 20;
     this.persistent = options.persistent || false;
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
@@ -77,10 +77,16 @@ export class DaemonServer {
           screenshot = await this.sessionManager.screenshotOnError(session);
         } catch {}
       }
-      const error = { message: e.message };
+      const error = { message: this.truncateError(e.message) };
       if (screenshot) error.screenshot = screenshot;
       socket.write(JSON.stringify({ error, id: request.id }) + "\n");
     }
+  }
+
+  truncateError(message) {
+    const lines = message.split("\n");
+    if (lines.length <= 6) return message;
+    return lines.slice(0, 3).join("\n") + `\n... and ${lines.length - 3} more lines`;
   }
 
   async handleRequest(request) {
@@ -116,6 +122,7 @@ export class DaemonServer {
       case "upload": return this.sessionManager.upload(params.session, params);
       case "set-scope": return this.sessionManager.setScope(params.session, params.selector);
       case "clear-scope": return this.sessionManager.clearScope(params.session);
+      case "set-snapshot": return this.sessionManager.setSnapshot(params.session, params.mode);
       case "cookies": return this.sessionManager.cookies(params.session, params);
       case "download": return this.sessionManager.download(params.session, params);
       case "save-pdf": return this.sessionManager.savePdf(params.session, params);

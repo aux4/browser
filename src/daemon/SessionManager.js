@@ -9,7 +9,7 @@ export class SessionManager {
   constructor(browser, options = {}) {
     this.browser = browser;
     this.sessions = new Map();
-    this.maxSessions = options.maxSessions || 10;
+    this.maxSessions = options.maxSessions || 20;
     this.onEmpty = options.onEmpty || (() => {});
   }
 
@@ -31,6 +31,12 @@ export class SessionManager {
     if (session.scope) session.scopeStack.push(session.scope);
     session.scope = selector;
     return { status: "ok", scope: selector };
+  }
+
+  setSnapshot(sessionId, mode) {
+    const session = this.getSession(sessionId);
+    session.snapshotMode = mode || "off";
+    return { status: "ok", snapshot: session.snapshotMode };
   }
 
   clearScope(sessionId) {
@@ -83,7 +89,7 @@ export class SessionManager {
     const context = await this.browser.newContext(contextOptions);
 
     const page = await context.newPage();
-    if (params.url && params.url !== "") await page.goto(params.url, { waitUntil: "networkidle" });
+    if (params.url && params.url !== "") await page.goto(params.url, { waitUntil: "domcontentloaded" });
 
     const snapshotMode = params.snapshot || "off";
     const session = {
@@ -169,7 +175,7 @@ export class SessionManager {
 
   async visit(sessionId, url) {
     const session = this.getSession(sessionId);
-    await session.pages[session.activeTab].goto(url, { waitUntil: "networkidle" });
+    await session.pages[session.activeTab].goto(url, { waitUntil: "domcontentloaded" });
     return this._attachSnapshot(session, { status: "ok", url });
   }
 
@@ -198,7 +204,9 @@ export class SessionManager {
     const session = this.getSession(sessionId);
     const base = this.getBase(session);
     const role = params.role || "button";
-    await base.getByRole(role, { name: params.name }).click({ timeout: parseInt(params.timeout) || 5000 });
+    const locator = base.getByRole(role, { name: params.name });
+    const index = params.index != null ? parseInt(params.index) - 1 : 0;
+    await locator.nth(index).click({ timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
   }
 
@@ -212,7 +220,9 @@ export class SessionManager {
   async clickText(sessionId, params) {
     const session = this.getSession(sessionId);
     const base = this.getBase(session);
-    await base.getByText(params.text, { exact: false }).first().click({ timeout: parseInt(params.timeout) || 5000 });
+    const locator = base.getByText(params.text, { exact: false });
+    const index = params.index != null ? parseInt(params.index) - 1 : 0;
+    await locator.nth(index).click({ timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
   }
 
@@ -227,7 +237,10 @@ export class SessionManager {
   async scroll(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
-    if (params.direction === "top") {
+    if (params.to) {
+      const base = this.getBase(session);
+      await base.getByText(params.to, { exact: false }).first().scrollIntoViewIfNeeded({ timeout: parseInt(params.timeout) || 5000 });
+    } else if (params.direction === "top") {
       await page.evaluate(() => window.scrollTo(0, 0));
     } else if (params.direction === "bottom") {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
@@ -386,6 +399,10 @@ export class SessionManager {
   async press(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
+    if (params.selector) {
+      const base = this.getBase(session);
+      await base.locator(params.selector).first().focus({ timeout: parseInt(params.timeout) || 5000 });
+    }
     await page.keyboard.press(params.key);
     return this._attachSnapshot(session, { status: "ok" });
   }
@@ -452,7 +469,7 @@ export class SessionManager {
   async newTab(sessionId, url) {
     const session = this.getSession(sessionId);
     const page = await session.context.newPage();
-    if (url && url !== "") await page.goto(url, { waitUntil: "networkidle" });
+    if (url && url !== "") await page.goto(url, { waitUntil: "domcontentloaded" });
     session.pages.push(page);
     session.activeTab = session.pages.length - 1;
     return { status: "ok", tab: session.activeTab, tabs: session.pages.length };
@@ -680,6 +697,7 @@ export class SessionManager {
       case "upload": return this.upload(sessionId, params);
       case "set-scope": return this.setScope(sessionId, params.selector);
       case "clear-scope": return this.clearScope(sessionId);
+      case "set-snapshot": return this.setSnapshot(sessionId, params.mode);
       default: throw new Error(`Unknown method in execute: ${method}`);
     }
   }
