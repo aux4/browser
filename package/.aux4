@@ -76,7 +76,7 @@
         {
           "name": "open",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot)"
+            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil)"
           ],
           "help": {
             "text": "Open a new browser session",
@@ -115,6 +115,11 @@
                 "name": "snapshot",
                 "text": "Auto-snapshot mode on actions: off, auto, full",
                 "default": "off"
+              },
+              {
+                "name": "waitUntil",
+                "text": "Navigation wait strategy: domcontentloaded, load, networkidle, settle",
+                "default": "load"
               }
             ]
           }
@@ -147,7 +152,7 @@
         {
           "name": "visit",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs visit values(session,url)"
+            "node ${packageDir}/lib/aux4-browser.mjs visit values(session,url,waitUntil)"
           ],
           "help": {
             "text": "Navigate to a URL",
@@ -161,6 +166,11 @@
                 "name": "url",
                 "text": "URL to navigate to",
                 "required": true
+              },
+              {
+                "name": "waitUntil",
+                "text": "Navigation wait strategy: domcontentloaded, load, networkidle, settle",
+                "default": "load"
               }
             ]
           }
@@ -216,10 +226,10 @@
         {
           "name": "click",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs click values(session,name,role,index)"
+            "node ${packageDir}/lib/aux4-browser.mjs click values(session,name,role,index,ref)"
           ],
           "help": {
-            "text": "Click an element",
+            "text": "Click an element by role+name or snapshot ref index",
             "variables": [
               {
                 "name": "session",
@@ -229,7 +239,7 @@
               {
                 "name": "name",
                 "text": "Accessible name of the element",
-                "required": true
+                "default": ""
               },
               {
                 "name": "role",
@@ -239,6 +249,11 @@
               {
                 "name": "index",
                 "text": "1-based index when multiple elements match",
+                "default": ""
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot command), overrides name/role",
                 "default": ""
               }
             ]
@@ -545,7 +560,7 @@
         {
           "name": "content",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs content values(session,selector,format)"
+            "node ${packageDir}/lib/aux4-browser.mjs content values(session,selector,format,output)"
           ],
           "help": {
             "text": "Get page content",
@@ -564,6 +579,11 @@
                 "name": "format",
                 "text": "Output format: markdown, html, text",
                 "default": "markdown"
+              },
+              {
+                "name": "output",
+                "text": "Write content to file instead of stdout, returns path + summary",
+                "default": ""
               }
             ]
           }
@@ -595,12 +615,48 @@
           }
         },
         {
+          "name": "read",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs read values(url,session,format,waitUntil,output)"
+          ],
+          "help": {
+            "text": "One-shot page read: navigate, settle, and return content + status",
+            "variables": [
+              {
+                "name": "url",
+                "text": "URL to read",
+                "required": true
+              },
+              {
+                "name": "session",
+                "text": "Existing session ID to reuse (optional)",
+                "default": ""
+              },
+              {
+                "name": "format",
+                "text": "Content format: markdown, html, text",
+                "default": "markdown"
+              },
+              {
+                "name": "waitUntil",
+                "text": "Navigation wait strategy: domcontentloaded, load, networkidle, settle",
+                "default": "load"
+              },
+              {
+                "name": "output",
+                "text": "Write content to file instead of inline, returns path + summary",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
           "name": "wait",
           "execute": [
             "node ${packageDir}/lib/aux4-browser.mjs wait values(session,selector,timeout)"
           ],
           "help": {
-            "text": "Wait for a selector to appear",
+            "text": "Wait for a condition: CSS selector, text=..., url=..., networkidle, or settle",
             "variables": [
               {
                 "name": "session",
@@ -609,13 +665,13 @@
               },
               {
                 "name": "selector",
-                "text": "CSS selector to wait for",
+                "text": "Wait target: CSS selector, text=..., url=..., networkidle, or settle",
                 "required": true
               },
               {
                 "name": "timeout",
                 "text": "Timeout in milliseconds",
-                "default": "5000"
+                "default": "10000"
               }
             ]
           }
@@ -1141,7 +1197,7 @@
         {
           "name": "snapshot",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs snapshot values(session,mode,format)"
+            "node ${packageDir}/lib/aux4-browser.mjs snapshot values(session,mode,format,output)"
           ],
           "help": {
             "text": "Return an accessibility snapshot of the current page",
@@ -1160,17 +1216,13 @@
                 "name": "format",
                 "text": "Output format: json, text",
                 "default": "json"
+              },
+              {
+                "name": "output",
+                "text": "Write snapshot to file instead of stdout, returns path + summary",
+                "default": ""
               }
             ]
-          }
-        },
-        {
-          "name": "mcp",
-          "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs mcp"
-          ],
-          "help": {
-            "text": "Start MCP server mode"
           }
         }
       ]

@@ -31,9 +31,10 @@ import { PressCommand } from "../commands/PressCommand.js";
 import { ClearCommand } from "../commands/ClearCommand.js";
 import { UploadCommand } from "../commands/UploadCommand.js";
 import { SetScopeCommand, ClearScopeCommand } from "../commands/ScopeCommand.js";
+import { SetSnapshotCommand } from "../commands/SetSnapshotCommand.js";
 import { ComponentCommand } from "../commands/ComponentCommand.js";
 import { SnapshotCommand } from "../commands/SnapshotCommand.js";
-import { McpCommand } from "../commands/McpCommand.js";
+import { ReadCommand } from "../commands/ReadCommand.js";
 
 const args = process.argv.slice(2);
 const action = args[0];
@@ -42,21 +43,22 @@ const values = args.slice(1);
 const commands = {
   start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
-  visit:       { handler: VisitCommand,    args: ["session", "url"] },
+  visit:       { handler: VisitCommand,    args: ["session", "url", "waitUntil"] },
   back:        { handler: BackCommand,     args: ["session"] },
   forward:     { handler: ForwardCommand,  args: ["session"] },
   reload:      { handler: ReloadCommand,   args: ["session"] },
-  click:       { handler: ClickCommand,    args: ["session", "name", "role"] },
+  click:       { handler: ClickCommand,    args: ["session", "name", "role", "index", "ref"] },
   "click-selector": { handler: ClickSelectorCommand, args: ["session", "selector"] },
-  "click-text": { handler: ClickTextCommand, args: ["session", "text"] },
+  "click-text": { handler: ClickTextCommand, args: ["session", "text", "index"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
   type:        { handler: TypeCommand,     args: ["session", "name", "value", "role"] },
-  scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount"] },
-  content:     { handler: ContentCommand,  args: ["session", "selector", "format"] },
+  scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount", "to"] },
+  content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output"] },
   screenshot:  { handler: ScreenshotCommand, args: ["session", "output", "fullPage"] },
+  read:        { handler: ReadCommand,     args: ["url", "session", "format", "waitUntil", "output"] },
   wait:        { handler: WaitCommand,     args: ["session", "selector", "timeout"] },
   eval:        { handler: EvalCommand,     args: ["session", "script"] },
   expect:      { handler: ExpectCommand,  args: ["session", "selector", "assertion", "expected", "timeout"] },
@@ -69,18 +71,18 @@ const commands = {
   check:       { handler: CheckCommand,    args: ["session", "name", "role"] },
   uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role"] },
   hover:       { handler: HoverCommand,    args: ["session", "name", "role"] },
-  press:       { handler: PressCommand,    args: ["session", "key"] },
+  press:       { handler: PressCommand,    args: ["session", "key", "selector"] },
   clear:       { handler: ClearCommand,    args: ["session", "name", "role"] },
   upload:      { handler: UploadCommand,   args: ["session", "name", "file"] },
   "set-scope": { handler: SetScopeCommand, args: ["session", "selector"] },
   "clear-scope": { handler: ClearScopeCommand, args: ["session"] },
+  "set-snapshot": { handler: SetSnapshotCommand, args: ["session", "mode"] },
   component:   { handler: ComponentCommand, args: ["session", "type", "action", "name", "row", "col", "where", "item", "field", "fields", "value", "tab", "path", "title", "timeout"] },
-  snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format"] },
+  snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format", "output"] },
   "new-tab":   { handler: NewTabCommand,   args: ["session", "url"] },
   "switch-tab": { handler: SwitchTabCommand, args: ["session", "tab"] },
   "close-tab": { handler: CloseTabCommand, args: ["session", "tab"] },
   "list-tabs": { handler: ListTabsCommand, args: ["session"] },
-  mcp:         { handler: McpCommand,      args: [] }
 };
 
 const command = commands[action];

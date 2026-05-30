@@ -1,11 +1,10 @@
 import { DaemonClient } from "../client/DaemonClient.js";
 
-export async function ClickTextCommand(params) {
+export async function SetSnapshotCommand(params) {
   const client = new DaemonClient();
-  const result = await client.send("click-text", {
+  const result = await client.send("set-snapshot", {
     session: params.session,
-    text: params.text,
-    index: params.index
+    mode: params.mode
   });
   console.log(JSON.stringify(result));
 }

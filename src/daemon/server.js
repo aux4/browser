@@ -96,7 +96,8 @@ export class DaemonServer {
       case "open": return this.sessionManager.open(params);
       case "close": return this.sessionManager.close(params.session);
       case "list": return this.sessionManager.list();
-      case "visit": return this.sessionManager.visit(params.session, params.url);
+      case "visit": return this.sessionManager.visit(params.session, params.url, params.waitUntil);
+      case "read": return this.sessionManager.read(params);
       case "back": return this.sessionManager.back(params.session);
       case "forward": return this.sessionManager.forward(params.session);
       case "reload": return this.sessionManager.reload(params.session);

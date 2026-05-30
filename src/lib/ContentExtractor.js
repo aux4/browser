@@ -2,18 +2,37 @@ export class ContentExtractor {
   static async extract(page, options = {}) {
     const { selector, format = "markdown" } = options;
     const element = selector && selector !== "" ? await page.$(selector) : await page.$("body");
-    if (!element) return { content: "" };
+    if (!element) return { content: "", warning: "no element found" };
 
+    let content;
     switch (format) {
       case "html":
-        return { content: await element.innerHTML() };
+        content = await element.innerHTML();
+        break;
       case "text":
-        return { content: (await element.textContent()).trim() };
+        content = (await element.textContent()).trim();
+        break;
       case "markdown":
       default:
         const html = await element.innerHTML();
-        return { content: ContentExtractor.htmlToMarkdown(html) };
+        content = ContentExtractor.htmlToMarkdown(html);
+        break;
     }
+
+    const result = { content };
+    const warning = ContentExtractor.checkContent(page, content);
+    if (warning) result.warning = warning;
+    return result;
+  }
+
+  static checkContent(page, content) {
+    if (!content || content.length === 0) {
+      return "page returned empty content — it may not be fully rendered";
+    }
+    if (content.length < 100) {
+      return "content is very short (<100 chars) — page may not be fully rendered";
+    }
+    return null;
   }
 
   static htmlToMarkdown(html) {

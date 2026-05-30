@@ -1,9 +1,12 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import os from "node:os";
 import { ContentExtractor } from "../lib/ContentExtractor.js";
 import { SnapshotBuilder } from "../lib/SnapshotBuilder.js";
 import { ComponentResolver } from "../lib/ComponentResolver.js";
+
+const ARTIFACTS_DIR = path.join(os.homedir(), ".aux4.config", "browser", "artifacts");
 
 export class SessionManager {
   constructor(browser, options = {}) {
@@ -11,6 +14,25 @@ export class SessionManager {
     this.sessions = new Map();
     this.maxSessions = options.maxSessions || 20;
     this.onEmpty = options.onEmpty || (() => {});
+  }
+
+  _writeArtifact(name, content, outputPath) {
+    const dir = outputPath ? path.dirname(outputPath) : ARTIFACTS_DIR;
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = outputPath || path.join(ARTIFACTS_DIR, name);
+    fs.writeFileSync(filePath, content, "utf-8");
+    return filePath;
+  }
+
+  _contentSummary(content) {
+    const lines = content.split("\n");
+    const headings = lines.filter(l => /^#{1,3}\s/.test(l)).map(l => l.replace(/^#+\s*/, ""));
+    const firstLine = lines.find(l => l.trim().length > 0) || "";
+    return {
+      headingCount: headings.length,
+      firstHeading: headings[0] || "",
+      preview: firstLine.slice(0, 120)
+    };
   }
 
   getSession(sessionId) {
@@ -65,6 +87,47 @@ export class SessionManager {
     }
   }
 
+  async _navigate(page, url, waitUntil) {
+    const strategy = waitUntil || "load";
+    if (strategy === "settle") {
+      const response = await page.goto(url, { waitUntil: "domcontentloaded" });
+      await this._waitForSettle(page);
+      return response;
+    }
+    return page.goto(url, { waitUntil: strategy });
+  }
+
+  async _waitForSettle(page, quietMs = 300) {
+    try {
+      await page.evaluate((ms) => {
+        return new Promise((resolve) => {
+          let timer = setTimeout(resolve, ms);
+          const observer = new MutationObserver(() => {
+            clearTimeout(timer);
+            timer = setTimeout(() => { observer.disconnect(); resolve(); }, ms);
+          });
+          observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+        });
+      }, quietMs);
+    } catch {
+      // page may have navigated away; settle is best-effort
+    }
+  }
+
+  _pageInfo(page, response) {
+    const info = { finalUrl: page.url() };
+    if (response) {
+      info.httpStatus = response.status();
+    }
+    return info;
+  }
+
+  async _pageInfoAsync(page, response) {
+    const info = this._pageInfo(page, response);
+    try { info.title = await page.title(); } catch { info.title = ""; }
+    return info;
+  }
+
   async open(params = {}) {
     if (this.sessions.size >= this.maxSessions) {
       throw new Error(`Max sessions (${this.maxSessions}) reached`);
@@ -89,7 +152,10 @@ export class SessionManager {
     const context = await this.browser.newContext(contextOptions);
 
     const page = await context.newPage();
-    if (params.url && params.url !== "") await page.goto(params.url, { waitUntil: "domcontentloaded" });
+    let response = null;
+    if (params.url && params.url !== "") {
+      response = await this._navigate(page, params.url, params.waitUntil);
+    }
 
     const snapshotMode = params.snapshot || "off";
     const session = {
@@ -100,7 +166,7 @@ export class SessionManager {
     };
 
     this.sessions.set(id, session);
-    const result = { sessionId: id };
+    const result = { sessionId: id, ...(await this._pageInfoAsync(page, response)) };
     await this._attachSnapshot(session, result);
     return result;
   }
@@ -173,10 +239,12 @@ export class SessionManager {
     return result;
   }
 
-  async visit(sessionId, url) {
+  async visit(sessionId, url, waitUntil) {
     const session = this.getSession(sessionId);
-    await session.pages[session.activeTab].goto(url, { waitUntil: "domcontentloaded" });
-    return this._attachSnapshot(session, { status: "ok", url });
+    const page = session.pages[session.activeTab];
+    const response = await this._navigate(page, url, waitUntil);
+    const info = await this._pageInfoAsync(page, response);
+    return this._attachSnapshot(session, { status: "ok", ...info });
   }
 
   async back(sessionId) {
@@ -200,21 +268,102 @@ export class SessionManager {
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
+  async _clickWithTimeout(session, locator, timeout, description) {
+    try {
+      await locator.click({ timeout });
+      return this._attachSnapshot(session, { status: "ok" });
+    } catch (e) {
+      if (e.message && e.message.includes("Timeout")) {
+        const page = session.pages[session.activeTab];
+        return {
+          clicked: false,
+          reason: "timeout",
+          description,
+          timeout,
+          currentUrl: page.url(),
+          title: await page.title().catch(() => "")
+        };
+      }
+      throw e;
+    }
+  }
+
   async click(sessionId, params) {
     const session = this.getSession(sessionId);
+    const timeout = parseInt(params.timeout) || 5000;
+
+    // Click by snapshot ref index
+    if (params.ref != null) {
+      const page = session.pages[session.activeTab];
+      const ref = parseInt(params.ref);
+      const clicked = await page.evaluate((targetRef) => {
+        const INTERACTIVE_ROLES = [
+          "button", "link", "textbox", "checkbox", "radio", "combobox", "listbox",
+          "menuitem", "tab", "switch", "searchbox", "slider", "spinbutton", "option"
+        ];
+        const COMPONENT_ROLES = ["table", "form", "list", "navigation", "menu", "dialog", "tablist", "tree"];
+        const implicitRole = (el) => {
+          const tag = el.tagName.toLowerCase();
+          switch (tag) {
+            case "a": return el.hasAttribute("href") ? "link" : null;
+            case "button": return "button";
+            case "input": {
+              const type = (el.getAttribute("type") || "text").toLowerCase();
+              if (type === "checkbox") return "checkbox";
+              if (type === "radio") return "radio";
+              if (type === "submit" || type === "button" || type === "reset") return "button";
+              if (type === "range") return "slider";
+              if (type === "number") return "spinbutton";
+              if (type === "search") return "searchbox";
+              return "textbox";
+            }
+            case "textarea": return "textbox";
+            case "select": return "combobox";
+            case "nav": return "navigation";
+            case "table": return "table";
+            case "form": return "form";
+            case "ul": case "ol": return "list";
+            case "dialog": return "dialog";
+            case "option": return "option";
+            default: return null;
+          }
+        };
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) return false;
+          const style = window.getComputedStyle(el);
+          return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
+        };
+        const allRoles = [...INTERACTIVE_ROLES, ...COMPONENT_ROLES];
+        let ref = 0;
+        for (const el of document.querySelectorAll("*")) {
+          const role = el.getAttribute("role") || implicitRole(el);
+          if (!role || !allRoles.includes(role)) continue;
+          if (!isVisible(el)) continue;
+          ref++;
+          if (ref === targetRef) {
+            el.click();
+            return true;
+          }
+        }
+        return false;
+      }, ref);
+      if (!clicked) throw new Error(`Snapshot ref [${ref}] not found on page`);
+      return this._attachSnapshot(session, { status: "ok" });
+    }
+
     const base = this.getBase(session);
     const role = params.role || "button";
     const locator = base.getByRole(role, { name: params.name });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
-    await locator.nth(index).click({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    return this._clickWithTimeout(session, locator.nth(index), timeout, `role=${role} name="${params.name}"`);
   }
 
   async clickSelector(sessionId, params) {
     const session = this.getSession(sessionId);
     const base = this.getBase(session);
-    await base.locator(params.selector).first().click({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    const timeout = parseInt(params.timeout) || 5000;
+    return this._clickWithTimeout(session, base.locator(params.selector).first(), timeout, `selector="${params.selector}"`);
   }
 
   async clickText(sessionId, params) {
@@ -222,8 +371,8 @@ export class SessionManager {
     const base = this.getBase(session);
     const locator = base.getByText(params.text, { exact: false });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
-    await locator.nth(index).click({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    const timeout = parseInt(params.timeout) || 5000;
+    return this._clickWithTimeout(session, locator.nth(index), timeout, `text="${params.text}"`);
   }
 
   async type(sessionId, params) {
@@ -255,7 +404,69 @@ export class SessionManager {
   async content(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
-    return ContentExtractor.extract(page, params);
+    const result = await ContentExtractor.extract(page, params);
+
+    if (params.output) {
+      const filePath = this._writeArtifact(
+        `content-${sessionId}-${Date.now()}.md`,
+        result.content,
+        params.output
+      );
+      return {
+        status: "ok",
+        path: filePath,
+        contentLength: result.content.length,
+        ...this._contentSummary(result.content),
+        ...(result.warning ? { warning: result.warning } : {})
+      };
+    }
+
+    return result;
+  }
+
+  async read(params = {}) {
+    const url = params.url;
+    if (!url) throw new Error("read: --url is required");
+    const format = params.format || "markdown";
+    const waitUntil = params.waitUntil || "load";
+
+    // Reuse existing session if one is already open, otherwise create one
+    let sessionId = params.session;
+    let created = false;
+    if (!sessionId) {
+      const openResult = await this.open({ snapshot: "off" });
+      sessionId = openResult.sessionId;
+      created = true;
+    }
+
+    const session = this.getSession(sessionId);
+    const page = session.pages[session.activeTab];
+    const response = await this._navigate(page, url, waitUntil);
+    const info = await this._pageInfoAsync(page, response);
+    const { content, warning } = await ContentExtractor.extract(page, { format });
+
+    if (params.output) {
+      const filePath = this._writeArtifact(
+        `read-${sessionId}-${Date.now()}.md`,
+        content,
+        params.output
+      );
+      const result = { status: "ok", ...info, path: filePath, contentLength: content.length, ...this._contentSummary(content) };
+      if (warning) result.warning = warning;
+      if (created) { await this.close(sessionId); result.sessionClosed = true; }
+      else { result.sessionId = sessionId; }
+      return result;
+    }
+
+    const result = { status: "ok", ...info, content };
+    if (warning) result.warning = warning;
+    if (created) {
+      await this.close(sessionId);
+      result.sessionClosed = true;
+    } else {
+      result.sessionId = sessionId;
+    }
+    return result;
   }
 
   async screenshot(sessionId, params) {
@@ -269,10 +480,56 @@ export class SessionManager {
 
   async wait(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
-    const timeout = parseInt(params.timeout) || 5000;
-    await base.locator(params.selector).first().waitFor({ state: "visible", timeout });
-    return { status: "ok" };
+    const page = session.pages[session.activeTab];
+    const timeout = parseInt(params.timeout) || 10000;
+    const selector = params.selector || "";
+
+    try {
+      // networkidle mode
+      if (selector === "networkidle") {
+        await page.waitForLoadState("networkidle", { timeout });
+        return { status: "ok", mode: "networkidle" };
+      }
+
+      // url= mode: wait for URL to match
+      if (selector.startsWith("url=")) {
+        const pattern = selector.slice(4);
+        await page.waitForURL(`**${pattern}**`, { timeout });
+        return { status: "ok", mode: "url", url: page.url() };
+      }
+
+      // text= mode: wait for text to appear
+      if (selector.startsWith("text=")) {
+        const text = selector.slice(5);
+        const base = this.getBase(session);
+        await base.getByText(text, { exact: false }).first().waitFor({ state: "visible", timeout });
+        return { status: "ok", mode: "text" };
+      }
+
+      // settle mode: wait for DOM to stop mutating
+      if (selector === "settle") {
+        await this._waitForSettle(page, 300);
+        return { status: "ok", mode: "settle" };
+      }
+
+      // Default: CSS selector
+      const base = this.getBase(session);
+      await base.locator(selector).first().waitFor({ state: "visible", timeout });
+      return { status: "ok" };
+    } catch (e) {
+      if (e.message && e.message.includes("Timeout")) {
+        const title = await page.title().catch(() => "");
+        return {
+          timedOut: true,
+          waitedFor: selector,
+          timeout,
+          currentUrl: page.url(),
+          title,
+          visibleHeadings: await page.locator("h1, h2, h3").count().catch(() => 0)
+        };
+      }
+      throw e;
+    }
   }
 
   async expect(sessionId, params) {
@@ -469,7 +726,7 @@ export class SessionManager {
   async newTab(sessionId, url) {
     const session = this.getSession(sessionId);
     const page = await session.context.newPage();
-    if (url && url !== "") await page.goto(url, { waitUntil: "domcontentloaded" });
+    if (url && url !== "") await this._navigate(page, url);
     session.pages.push(page);
     session.activeTab = session.pages.length - 1;
     return { status: "ok", tab: session.activeTab, tabs: session.pages.length };
@@ -644,6 +901,24 @@ export class SessionManager {
     const mode = params.mode || "auto";
     const page = session.pages[session.activeTab];
     const snapshot = await SnapshotBuilder.build(page, mode);
+
+    if (params.output) {
+      const text = SnapshotBuilder.render(snapshot);
+      const filePath = this._writeArtifact(
+        `snapshot-${sessionId}-${Date.now()}.txt`,
+        text,
+        params.output
+      );
+      return {
+        status: "ok",
+        path: filePath,
+        title: snapshot.title,
+        url: snapshot.url,
+        elementCount: snapshot.elements.length,
+        componentCount: snapshot.components.length
+      };
+    }
+
     if (params.format === "text") {
       return { status: "ok", text: SnapshotBuilder.render(snapshot) };
     }
@@ -670,7 +945,7 @@ export class SessionManager {
 
   async handleMethod(sessionId, method, params) {
     switch (method) {
-      case "visit": return this.visit(sessionId, params.url);
+      case "visit": return this.visit(sessionId, params.url, params.waitUntil);
       case "back": return this.back(sessionId);
       case "forward": return this.forward(sessionId);
       case "reload": return this.reload(sessionId);
@@ -698,6 +973,7 @@ export class SessionManager {
       case "set-scope": return this.setScope(sessionId, params.selector);
       case "clear-scope": return this.clearScope(sessionId);
       case "set-snapshot": return this.setSnapshot(sessionId, params.mode);
+      case "read": return this.read({ ...params, session: sessionId });
       default: throw new Error(`Unknown method in execute: ${method}`);
     }
   }

@@ -5,7 +5,12 @@ export async function ContentCommand(params) {
   const result = await client.send("content", {
     session: params.session,
     selector: params.selector,
-    format: params.format
+    format: params.format,
+    output: params.output
   });
-  console.log(result.content);
+  if (params.output) {
+    console.log(JSON.stringify(result));
+  } else {
+    console.log(result.content);
+  }
 }

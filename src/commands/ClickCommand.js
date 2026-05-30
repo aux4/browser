@@ -5,7 +5,9 @@ export async function ClickCommand(params) {
   const result = await client.send("click", {
     session: params.session,
     name: params.name,
-    role: params.role
+    role: params.role,
+    index: params.index,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }

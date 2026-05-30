@@ -5,26 +5,42 @@ import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { webkit, firefox, chromium } from 'playwright';
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { z } from 'zod';
 
 class ContentExtractor {
   static async extract(page, options = {}) {
     const { selector, format = "markdown" } = options;
     const element = selector && selector !== "" ? await page.$(selector) : await page.$("body");
-    if (!element) return { content: "" };
+    if (!element) return { content: "", warning: "no element found" };
 
+    let content;
     switch (format) {
       case "html":
-        return { content: await element.innerHTML() };
+        content = await element.innerHTML();
+        break;
       case "text":
-        return { content: (await element.textContent()).trim() };
+        content = (await element.textContent()).trim();
+        break;
       case "markdown":
       default:
         const html = await element.innerHTML();
-        return { content: ContentExtractor.htmlToMarkdown(html) };
+        content = ContentExtractor.htmlToMarkdown(html);
+        break;
     }
+
+    const result = { content };
+    const warning = ContentExtractor.checkContent(page, content);
+    if (warning) result.warning = warning;
+    return result;
+  }
+
+  static checkContent(page, content) {
+    if (!content || content.length === 0) {
+      return "page returned empty content — it may not be fully rendered";
+    }
+    if (content.length < 100) {
+      return "content is very short (<100 chars) — page may not be fully rendered";
+    }
+    return null;
   }
 
   static htmlToMarkdown(html) {
@@ -390,12 +406,33 @@ class ComponentResolver {
   }
 }
 
+const ARTIFACTS_DIR = path.join(os.homedir(), ".aux4.config", "browser", "artifacts");
+
 class SessionManager {
   constructor(browser, options = {}) {
     this.browser = browser;
     this.sessions = new Map();
-    this.maxSessions = options.maxSessions || 10;
+    this.maxSessions = options.maxSessions || 20;
     this.onEmpty = options.onEmpty || (() => {});
+  }
+
+  _writeArtifact(name, content, outputPath) {
+    const dir = outputPath ? path.dirname(outputPath) : ARTIFACTS_DIR;
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = outputPath || path.join(ARTIFACTS_DIR, name);
+    fs.writeFileSync(filePath, content, "utf-8");
+    return filePath;
+  }
+
+  _contentSummary(content) {
+    const lines = content.split("\n");
+    const headings = lines.filter(l => /^#{1,3}\s/.test(l)).map(l => l.replace(/^#+\s*/, ""));
+    const firstLine = lines.find(l => l.trim().length > 0) || "";
+    return {
+      headingCount: headings.length,
+      firstHeading: headings[0] || "",
+      preview: firstLine.slice(0, 120)
+    };
   }
 
   getSession(sessionId) {
@@ -416,6 +453,12 @@ class SessionManager {
     if (session.scope) session.scopeStack.push(session.scope);
     session.scope = selector;
     return { status: "ok", scope: selector };
+  }
+
+  setSnapshot(sessionId, mode) {
+    const session = this.getSession(sessionId);
+    session.snapshotMode = mode || "off";
+    return { status: "ok", snapshot: session.snapshotMode };
   }
 
   clearScope(sessionId) {
@@ -444,6 +487,47 @@ class SessionManager {
     }
   }
 
+  async _navigate(page, url, waitUntil) {
+    const strategy = waitUntil || "load";
+    if (strategy === "settle") {
+      const response = await page.goto(url, { waitUntil: "domcontentloaded" });
+      await this._waitForSettle(page);
+      return response;
+    }
+    return page.goto(url, { waitUntil: strategy });
+  }
+
+  async _waitForSettle(page, quietMs = 300) {
+    try {
+      await page.evaluate((ms) => {
+        return new Promise((resolve) => {
+          let timer = setTimeout(resolve, ms);
+          const observer = new MutationObserver(() => {
+            clearTimeout(timer);
+            timer = setTimeout(() => { observer.disconnect(); resolve(); }, ms);
+          });
+          observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+        });
+      }, quietMs);
+    } catch {
+      // page may have navigated away; settle is best-effort
+    }
+  }
+
+  _pageInfo(page, response) {
+    const info = { finalUrl: page.url() };
+    if (response) {
+      info.httpStatus = response.status();
+    }
+    return info;
+  }
+
+  async _pageInfoAsync(page, response) {
+    const info = this._pageInfo(page, response);
+    try { info.title = await page.title(); } catch { info.title = ""; }
+    return info;
+  }
+
   async open(params = {}) {
     if (this.sessions.size >= this.maxSessions) {
       throw new Error(`Max sessions (${this.maxSessions}) reached`);
@@ -468,7 +552,10 @@ class SessionManager {
     const context = await this.browser.newContext(contextOptions);
 
     const page = await context.newPage();
-    if (params.url && params.url !== "") await page.goto(params.url, { waitUntil: "networkidle" });
+    let response = null;
+    if (params.url && params.url !== "") {
+      response = await this._navigate(page, params.url, params.waitUntil);
+    }
 
     const snapshotMode = params.snapshot || "off";
     const session = {
@@ -479,7 +566,7 @@ class SessionManager {
     };
 
     this.sessions.set(id, session);
-    const result = { sessionId: id };
+    const result = { sessionId: id, ...(await this._pageInfoAsync(page, response)) };
     await this._attachSnapshot(session, result);
     return result;
   }
@@ -552,10 +639,12 @@ class SessionManager {
     return result;
   }
 
-  async visit(sessionId, url) {
+  async visit(sessionId, url, waitUntil) {
     const session = this.getSession(sessionId);
-    await session.pages[session.activeTab].goto(url, { waitUntil: "networkidle" });
-    return this._attachSnapshot(session, { status: "ok", url });
+    const page = session.pages[session.activeTab];
+    const response = await this._navigate(page, url, waitUntil);
+    const info = await this._pageInfoAsync(page, response);
+    return this._attachSnapshot(session, { status: "ok", ...info });
   }
 
   async back(sessionId) {
@@ -579,26 +668,111 @@ class SessionManager {
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
+  async _clickWithTimeout(session, locator, timeout, description) {
+    try {
+      await locator.click({ timeout });
+      return this._attachSnapshot(session, { status: "ok" });
+    } catch (e) {
+      if (e.message && e.message.includes("Timeout")) {
+        const page = session.pages[session.activeTab];
+        return {
+          clicked: false,
+          reason: "timeout",
+          description,
+          timeout,
+          currentUrl: page.url(),
+          title: await page.title().catch(() => "")
+        };
+      }
+      throw e;
+    }
+  }
+
   async click(sessionId, params) {
     const session = this.getSession(sessionId);
+    const timeout = parseInt(params.timeout) || 5000;
+
+    // Click by snapshot ref index
+    if (params.ref != null) {
+      const page = session.pages[session.activeTab];
+      const ref = parseInt(params.ref);
+      const clicked = await page.evaluate((targetRef) => {
+        const INTERACTIVE_ROLES = [
+          "button", "link", "textbox", "checkbox", "radio", "combobox", "listbox",
+          "menuitem", "tab", "switch", "searchbox", "slider", "spinbutton", "option"
+        ];
+        const COMPONENT_ROLES = ["table", "form", "list", "navigation", "menu", "dialog", "tablist", "tree"];
+        const implicitRole = (el) => {
+          const tag = el.tagName.toLowerCase();
+          switch (tag) {
+            case "a": return el.hasAttribute("href") ? "link" : null;
+            case "button": return "button";
+            case "input": {
+              const type = (el.getAttribute("type") || "text").toLowerCase();
+              if (type === "checkbox") return "checkbox";
+              if (type === "radio") return "radio";
+              if (type === "submit" || type === "button" || type === "reset") return "button";
+              if (type === "range") return "slider";
+              if (type === "number") return "spinbutton";
+              if (type === "search") return "searchbox";
+              return "textbox";
+            }
+            case "textarea": return "textbox";
+            case "select": return "combobox";
+            case "nav": return "navigation";
+            case "table": return "table";
+            case "form": return "form";
+            case "ul": case "ol": return "list";
+            case "dialog": return "dialog";
+            case "option": return "option";
+            default: return null;
+          }
+        };
+        const isVisible = (el) => {
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) return false;
+          const style = window.getComputedStyle(el);
+          return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
+        };
+        const allRoles = [...INTERACTIVE_ROLES, ...COMPONENT_ROLES];
+        let ref = 0;
+        for (const el of document.querySelectorAll("*")) {
+          const role = el.getAttribute("role") || implicitRole(el);
+          if (!role || !allRoles.includes(role)) continue;
+          if (!isVisible(el)) continue;
+          ref++;
+          if (ref === targetRef) {
+            el.click();
+            return true;
+          }
+        }
+        return false;
+      }, ref);
+      if (!clicked) throw new Error(`Snapshot ref [${ref}] not found on page`);
+      return this._attachSnapshot(session, { status: "ok" });
+    }
+
     const base = this.getBase(session);
     const role = params.role || "button";
-    await base.getByRole(role, { name: params.name }).click({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    const locator = base.getByRole(role, { name: params.name });
+    const index = params.index != null ? parseInt(params.index) - 1 : 0;
+    return this._clickWithTimeout(session, locator.nth(index), timeout, `role=${role} name="${params.name}"`);
   }
 
   async clickSelector(sessionId, params) {
     const session = this.getSession(sessionId);
     const base = this.getBase(session);
-    await base.locator(params.selector).first().click({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    const timeout = parseInt(params.timeout) || 5000;
+    return this._clickWithTimeout(session, base.locator(params.selector).first(), timeout, `selector="${params.selector}"`);
   }
 
   async clickText(sessionId, params) {
     const session = this.getSession(sessionId);
     const base = this.getBase(session);
-    await base.getByText(params.text, { exact: false }).first().click({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    const locator = base.getByText(params.text, { exact: false });
+    const index = params.index != null ? parseInt(params.index) - 1 : 0;
+    const timeout = parseInt(params.timeout) || 5000;
+    return this._clickWithTimeout(session, locator.nth(index), timeout, `text="${params.text}"`);
   }
 
   async type(sessionId, params) {
@@ -612,7 +786,10 @@ class SessionManager {
   async scroll(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
-    if (params.direction === "top") {
+    if (params.to) {
+      const base = this.getBase(session);
+      await base.getByText(params.to, { exact: false }).first().scrollIntoViewIfNeeded({ timeout: parseInt(params.timeout) || 5000 });
+    } else if (params.direction === "top") {
       await page.evaluate(() => window.scrollTo(0, 0));
     } else if (params.direction === "bottom") {
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
@@ -627,7 +804,69 @@ class SessionManager {
   async content(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
-    return ContentExtractor.extract(page, params);
+    const result = await ContentExtractor.extract(page, params);
+
+    if (params.output) {
+      const filePath = this._writeArtifact(
+        `content-${sessionId}-${Date.now()}.md`,
+        result.content,
+        params.output
+      );
+      return {
+        status: "ok",
+        path: filePath,
+        contentLength: result.content.length,
+        ...this._contentSummary(result.content),
+        ...(result.warning ? { warning: result.warning } : {})
+      };
+    }
+
+    return result;
+  }
+
+  async read(params = {}) {
+    const url = params.url;
+    if (!url) throw new Error("read: --url is required");
+    const format = params.format || "markdown";
+    const waitUntil = params.waitUntil || "load";
+
+    // Reuse existing session if one is already open, otherwise create one
+    let sessionId = params.session;
+    let created = false;
+    if (!sessionId) {
+      const openResult = await this.open({ snapshot: "off" });
+      sessionId = openResult.sessionId;
+      created = true;
+    }
+
+    const session = this.getSession(sessionId);
+    const page = session.pages[session.activeTab];
+    const response = await this._navigate(page, url, waitUntil);
+    const info = await this._pageInfoAsync(page, response);
+    const { content, warning } = await ContentExtractor.extract(page, { format });
+
+    if (params.output) {
+      const filePath = this._writeArtifact(
+        `read-${sessionId}-${Date.now()}.md`,
+        content,
+        params.output
+      );
+      const result = { status: "ok", ...info, path: filePath, contentLength: content.length, ...this._contentSummary(content) };
+      if (warning) result.warning = warning;
+      if (created) { await this.close(sessionId); result.sessionClosed = true; }
+      else { result.sessionId = sessionId; }
+      return result;
+    }
+
+    const result = { status: "ok", ...info, content };
+    if (warning) result.warning = warning;
+    if (created) {
+      await this.close(sessionId);
+      result.sessionClosed = true;
+    } else {
+      result.sessionId = sessionId;
+    }
+    return result;
   }
 
   async screenshot(sessionId, params) {
@@ -641,10 +880,56 @@ class SessionManager {
 
   async wait(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
-    const timeout = parseInt(params.timeout) || 5000;
-    await base.locator(params.selector).first().waitFor({ state: "visible", timeout });
-    return { status: "ok" };
+    const page = session.pages[session.activeTab];
+    const timeout = parseInt(params.timeout) || 10000;
+    const selector = params.selector || "";
+
+    try {
+      // networkidle mode
+      if (selector === "networkidle") {
+        await page.waitForLoadState("networkidle", { timeout });
+        return { status: "ok", mode: "networkidle" };
+      }
+
+      // url= mode: wait for URL to match
+      if (selector.startsWith("url=")) {
+        const pattern = selector.slice(4);
+        await page.waitForURL(`**${pattern}**`, { timeout });
+        return { status: "ok", mode: "url", url: page.url() };
+      }
+
+      // text= mode: wait for text to appear
+      if (selector.startsWith("text=")) {
+        const text = selector.slice(5);
+        const base = this.getBase(session);
+        await base.getByText(text, { exact: false }).first().waitFor({ state: "visible", timeout });
+        return { status: "ok", mode: "text" };
+      }
+
+      // settle mode: wait for DOM to stop mutating
+      if (selector === "settle") {
+        await this._waitForSettle(page, 300);
+        return { status: "ok", mode: "settle" };
+      }
+
+      // Default: CSS selector
+      const base = this.getBase(session);
+      await base.locator(selector).first().waitFor({ state: "visible", timeout });
+      return { status: "ok" };
+    } catch (e) {
+      if (e.message && e.message.includes("Timeout")) {
+        const title = await page.title().catch(() => "");
+        return {
+          timedOut: true,
+          waitedFor: selector,
+          timeout,
+          currentUrl: page.url(),
+          title,
+          visibleHeadings: await page.locator("h1, h2, h3").count().catch(() => 0)
+        };
+      }
+      throw e;
+    }
   }
 
   async expect(sessionId, params) {
@@ -771,6 +1056,10 @@ class SessionManager {
   async press(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
+    if (params.selector) {
+      const base = this.getBase(session);
+      await base.locator(params.selector).first().focus({ timeout: parseInt(params.timeout) || 5000 });
+    }
     await page.keyboard.press(params.key);
     return this._attachSnapshot(session, { status: "ok" });
   }
@@ -837,7 +1126,7 @@ class SessionManager {
   async newTab(sessionId, url) {
     const session = this.getSession(sessionId);
     const page = await session.context.newPage();
-    if (url && url !== "") await page.goto(url, { waitUntil: "networkidle" });
+    if (url && url !== "") await this._navigate(page, url);
     session.pages.push(page);
     session.activeTab = session.pages.length - 1;
     return { status: "ok", tab: session.activeTab, tabs: session.pages.length };
@@ -1012,6 +1301,24 @@ class SessionManager {
     const mode = params.mode || "auto";
     const page = session.pages[session.activeTab];
     const snapshot = await SnapshotBuilder.build(page, mode);
+
+    if (params.output) {
+      const text = SnapshotBuilder.render(snapshot);
+      const filePath = this._writeArtifact(
+        `snapshot-${sessionId}-${Date.now()}.txt`,
+        text,
+        params.output
+      );
+      return {
+        status: "ok",
+        path: filePath,
+        title: snapshot.title,
+        url: snapshot.url,
+        elementCount: snapshot.elements.length,
+        componentCount: snapshot.components.length
+      };
+    }
+
     if (params.format === "text") {
       return { status: "ok", text: SnapshotBuilder.render(snapshot) };
     }
@@ -1038,7 +1345,7 @@ class SessionManager {
 
   async handleMethod(sessionId, method, params) {
     switch (method) {
-      case "visit": return this.visit(sessionId, params.url);
+      case "visit": return this.visit(sessionId, params.url, params.waitUntil);
       case "back": return this.back(sessionId);
       case "forward": return this.forward(sessionId);
       case "reload": return this.reload(sessionId);
@@ -1065,6 +1372,8 @@ class SessionManager {
       case "upload": return this.upload(sessionId, params);
       case "set-scope": return this.setScope(sessionId, params.selector);
       case "clear-scope": return this.clearScope(sessionId);
+      case "set-snapshot": return this.setSnapshot(sessionId, params.mode);
+      case "read": return this.read({ ...params, session: sessionId });
       default: throw new Error(`Unknown method in execute: ${method}`);
     }
   }
@@ -1094,7 +1403,7 @@ const PID_PATH$1 = path.join(SOCKET_DIR$1, "browser.pid");
 
 class DaemonServer {
   constructor(options = {}) {
-    this.maxSessions = options.maxSessions || 10;
+    this.maxSessions = options.maxSessions || 20;
     this.persistent = options.persistent || false;
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
@@ -1160,10 +1469,16 @@ class DaemonServer {
           screenshot = await this.sessionManager.screenshotOnError(session);
         } catch {}
       }
-      const error = { message: e.message };
+      const error = { message: this.truncateError(e.message) };
       if (screenshot) error.screenshot = screenshot;
       socket.write(JSON.stringify({ error, id: request.id }) + "\n");
     }
+  }
+
+  truncateError(message) {
+    const lines = message.split("\n");
+    if (lines.length <= 6) return message;
+    return lines.slice(0, 3).join("\n") + `\n... and ${lines.length - 3} more lines`;
   }
 
   async handleRequest(request) {
@@ -1173,7 +1488,8 @@ class DaemonServer {
       case "open": return this.sessionManager.open(params);
       case "close": return this.sessionManager.close(params.session);
       case "list": return this.sessionManager.list();
-      case "visit": return this.sessionManager.visit(params.session, params.url);
+      case "visit": return this.sessionManager.visit(params.session, params.url, params.waitUntil);
+      case "read": return this.sessionManager.read(params);
       case "back": return this.sessionManager.back(params.session);
       case "forward": return this.sessionManager.forward(params.session);
       case "reload": return this.sessionManager.reload(params.session);
@@ -1199,6 +1515,7 @@ class DaemonServer {
       case "upload": return this.sessionManager.upload(params.session, params);
       case "set-scope": return this.sessionManager.setScope(params.session, params.selector);
       case "clear-scope": return this.sessionManager.clearScope(params.session);
+      case "set-snapshot": return this.sessionManager.setSnapshot(params.session, params.mode);
       case "cookies": return this.sessionManager.cookies(params.session, params);
       case "download": return this.sessionManager.download(params.session, params);
       case "save-pdf": return this.sessionManager.savePdf(params.session, params);
@@ -1264,7 +1581,7 @@ async function StartCommand(params) {
   // If running as the forked daemon child, start server directly
   if (process.env.AUX4_BROWSER_DAEMON === "1") {
     const server = new DaemonServer({
-      maxSessions: parseInt(params.maxSessions) || 10,
+      maxSessions: parseInt(params.maxSessions) || 20,
       persistent: params.persistent === "true" || params.persistent === true,
       channel: params.channel || "",
       browser: params.browser || ""
@@ -1380,7 +1697,8 @@ async function OpenCommand(params) {
     height: params.height,
     output: params.output,
     video: params.video,
-    snapshot: params.snapshot
+    snapshot: params.snapshot,
+    waitUntil: params.waitUntil
   });
   if (result.snapshot) {
     console.log(JSON.stringify(result));
@@ -1403,7 +1721,7 @@ async function ListCommand() {
 
 async function VisitCommand(params) {
   const client = new DaemonClient();
-  const result = await client.send("visit", { session: params.session, url: params.url });
+  const result = await client.send("visit", { session: params.session, url: params.url, waitUntil: params.waitUntil });
   console.log(JSON.stringify(result));
 }
 
@@ -1430,7 +1748,9 @@ async function ClickCommand(params) {
   const result = await client.send("click", {
     session: params.session,
     name: params.name,
-    role: params.role
+    role: params.role,
+    index: params.index,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }
@@ -1448,7 +1768,8 @@ async function ClickTextCommand(params) {
   const client = new DaemonClient();
   const result = await client.send("click-text", {
     session: params.session,
-    text: params.text
+    text: params.text,
+    index: params.index
   });
   console.log(JSON.stringify(result));
 }
@@ -1513,7 +1834,8 @@ async function ScrollCommand(params) {
   const result = await client.send("scroll", {
     session: params.session,
     direction: params.direction,
-    amount: params.amount
+    amount: params.amount,
+    to: params.to
   });
   console.log(JSON.stringify(result));
 }
@@ -1523,9 +1845,14 @@ async function ContentCommand(params) {
   const result = await client.send("content", {
     session: params.session,
     selector: params.selector,
-    format: params.format
+    format: params.format,
+    output: params.output
   });
-  console.log(result.content);
+  if (params.output) {
+    console.log(JSON.stringify(result));
+  } else {
+    console.log(result.content);
+  }
 }
 
 async function ScreenshotCommand(params) {
@@ -1685,7 +2012,8 @@ async function PressCommand(params) {
   const client = new DaemonClient();
   const result = await client.send("press", {
     session: params.session,
-    key: params.key
+    key: params.key,
+    selector: params.selector
   });
   console.log(JSON.stringify(result));
 }
@@ -1727,6 +2055,15 @@ async function ClearScopeCommand(params) {
   console.log(JSON.stringify(result));
 }
 
+async function SetSnapshotCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("set-snapshot", {
+    session: params.session,
+    mode: params.mode
+  });
+  console.log(JSON.stringify(result));
+}
+
 async function ComponentCommand(params) {
   const client = new DaemonClient();
   const result = await client.send("component", {
@@ -1754,231 +2091,28 @@ async function SnapshotCommand(params) {
   const result = await client.send("snapshot", {
     session: params.session,
     mode: params.mode,
-    format: params.format
+    format: params.format,
+    output: params.output
   });
-  if (params.format === "text" && result.text != null) {
+  if (params.output) {
+    console.log(JSON.stringify(result));
+  } else if (params.format === "text" && result.text != null) {
     console.log(result.text);
   } else {
     console.log(JSON.stringify(result));
   }
 }
 
-async function McpCommand() {
-  const browser = await BrowserEngine.launch();
-  const sessionManager = new SessionManager(browser, { maxSessions: 10 });
-
-  const server = new McpServer({ name: "aux4-browser", version: "1.0.0" });
-
-  const ok = (result) => ({ content: [{ type: "text", text: JSON.stringify(result) }] });
-
-  server.tool("open", "Open a new browser session", {
-    url: z.string().optional().describe("URL to navigate to"),
-    timeout: z.string().optional().describe("Session timeout (e.g. 10m, 1h)"),
-    width: z.number().optional().describe("Viewport width"),
-    height: z.number().optional().describe("Viewport height")
-  }, async (params) => ok(await sessionManager.open(params)));
-
-  server.tool("close", "Close a browser session", {
-    session: z.string().describe("Session ID")
-  }, async (params) => ok(await sessionManager.close(params.session)));
-
-  server.tool("list", "List active browser sessions", {}, async () => ok(sessionManager.list()));
-
-  server.tool("visit", "Navigate to a URL", {
-    session: z.string().describe("Session ID"),
-    url: z.string().describe("URL to navigate to")
-  }, async (params) => ok(await sessionManager.visit(params.session, params.url)));
-
-  server.tool("back", "Go back in browser history", {
-    session: z.string().describe("Session ID")
-  }, async (params) => ok(await sessionManager.back(params.session)));
-
-  server.tool("forward", "Go forward in browser history", {
-    session: z.string().describe("Session ID")
-  }, async (params) => ok(await sessionManager.forward(params.session)));
-
-  server.tool("reload", "Reload the current page", {
-    session: z.string().describe("Session ID")
-  }, async (params) => ok(await sessionManager.reload(params.session)));
-
-  server.tool("click", "Click an element by role and name", {
-    session: z.string().describe("Session ID"),
-    name: z.string().describe("Accessible name of the element"),
-    role: z.string().optional().describe("ARIA role (default: button)")
-  }, async (params) => ok(await sessionManager.click(params.session, params)));
-
-  server.tool("click-selector", "Click an element by CSS selector", {
-    session: z.string().describe("Session ID"),
-    selector: z.string().describe("CSS selector")
-  }, async (params) => ok(await sessionManager.clickSelector(params.session, params)));
-
-  server.tool("click-text", "Click an element by its text content", {
-    session: z.string().describe("Session ID"),
-    text: z.string().describe("Text content to find and click")
-  }, async (params) => ok(await sessionManager.clickText(params.session, params)));
-
-  server.tool("click-item", "Click an item in a list by index or text", {
-    session: z.string().describe("Session ID"),
-    item: z.string().describe("Item index (1-based) or text to match"),
-    selector: z.string().optional().describe("CSS selector for the list container")
-  }, async (params) => ok(await sessionManager.clickItem(params.session, params)));
-
-  server.tool("type", "Type text into an input field", {
-    session: z.string().describe("Session ID"),
-    name: z.string().describe("Accessible name of the field"),
-    value: z.string().describe("Text to type"),
-    role: z.string().optional().describe("ARIA role (default: textbox)")
-  }, async (params) => ok(await sessionManager.type(params.session, params)));
-
-  server.tool("select", "Select an option from a dropdown", {
-    session: z.string().describe("Session ID"),
-    name: z.string().describe("Accessible name of the dropdown"),
-    value: z.string().describe("Option value to select"),
-    role: z.string().optional().describe("ARIA role (default: combobox)")
-  }, async (params) => ok(await sessionManager.select(params.session, params)));
-
-  server.tool("check", "Check a checkbox", {
-    session: z.string().describe("Session ID"),
-    name: z.string().describe("Accessible name of the checkbox"),
-    role: z.string().optional().describe("ARIA role (default: checkbox)")
-  }, async (params) => ok(await sessionManager.check(params.session, params)));
-
-  server.tool("uncheck", "Uncheck a checkbox", {
-    session: z.string().describe("Session ID"),
-    name: z.string().describe("Accessible name of the checkbox"),
-    role: z.string().optional().describe("ARIA role (default: checkbox)")
-  }, async (params) => ok(await sessionManager.uncheck(params.session, params)));
-
-  server.tool("hover", "Hover over an element", {
-    session: z.string().describe("Session ID"),
-    name: z.string().describe("Accessible name of the element"),
-    role: z.string().optional().describe("ARIA role (default: button)")
-  }, async (params) => ok(await sessionManager.hover(params.session, params)));
-
-  server.tool("press", "Press a keyboard key", {
-    session: z.string().describe("Session ID"),
-    key: z.string().describe("Key to press (e.g. Enter, Tab, Escape)")
-  }, async (params) => ok(await sessionManager.press(params.session, params)));
-
-  server.tool("clear", "Clear text from an input field", {
-    session: z.string().describe("Session ID"),
-    name: z.string().describe("Accessible name of the field"),
-    role: z.string().optional().describe("ARIA role (default: textbox)")
-  }, async (params) => ok(await sessionManager.clear(params.session, params)));
-
-  server.tool("upload", "Upload a file to a file input", {
-    session: z.string().describe("Session ID"),
-    name: z.string().describe("Label of the file input"),
-    file: z.string().describe("Path to the file to upload")
-  }, async (params) => ok(await sessionManager.upload(params.session, params)));
-
-  server.tool("scroll", "Scroll the page", {
-    session: z.string().describe("Session ID"),
-    direction: z.enum(["up", "down", "top", "bottom"]).optional().describe("Scroll direction (default: down)"),
-    amount: z.number().optional().describe("Scroll amount in pixels (default: 500)")
-  }, async (params) => ok(await sessionManager.scroll(params.session, params)));
-
-  server.tool("content", "Get page content", {
-    session: z.string().describe("Session ID"),
-    selector: z.string().optional().describe("CSS selector (default: full page)"),
-    format: z.enum(["markdown", "html", "text"]).optional().describe("Output format (default: markdown)")
-  }, async (params) => ok(await sessionManager.content(params.session, params)));
-
-  server.tool("screenshot", "Take a screenshot", {
-    session: z.string().describe("Session ID"),
-    output: z.string().optional().describe("Output file path"),
-    fullPage: z.boolean().optional().describe("Capture full page")
-  }, async (params) => ok(await sessionManager.screenshot(params.session, params)));
-
-  server.tool("save-pdf", "Save the current page as PDF", {
-    session: z.string().describe("Session ID"),
-    output: z.string().optional().describe("Output file path (default: page.pdf)"),
-    format: z.string().optional().describe("Page format (Letter, A4, Legal, Tabloid)"),
-    printBackground: z.boolean().optional().describe("Print background graphics")
-  }, async (params) => ok(await sessionManager.savePdf(params.session, params)));
-
-  server.tool("wait", "Wait for a selector to appear", {
-    session: z.string().describe("Session ID"),
-    selector: z.string().describe("CSS selector to wait for"),
-    timeout: z.number().optional().describe("Timeout in ms (default: 5000)")
-  }, async (params) => ok(await sessionManager.wait(params.session, params)));
-
-  server.tool("eval", "Evaluate JavaScript in the page", {
-    session: z.string().describe("Session ID"),
-    script: z.string().describe("JavaScript code to evaluate")
-  }, async (params) => ok(await sessionManager.evaluate(params.session, params.script)));
-
-  server.tool("expect", "Assert expectations on page elements", {
-    session: z.string().describe("Session ID"),
-    selector: z.string().describe("CSS selector"),
-    assertion: z.enum(["have_text", "be_visible", "exist", "not_exist", "have_attribute", "have_count", "have_count_at_least", "have_url", "have_title"]).describe("Assertion type"),
-    expected: z.string().optional().describe("Expected value (for have_text, have_attribute, have_count, have_url, have_title)"),
-    timeout: z.string().optional().describe("Timeout in ms (default: 5000)")
-  }, async (params) => ok(await sessionManager.expect(params.session, params)));
-
-  server.tool("expect-list", "Assert expectations on a list of items", {
-    session: z.string().describe("Session ID"),
-    assertion: z.enum(["at_least", "contains"]).describe("Assertion type"),
-    expected: z.string().describe("Expected value (count for at_least, text for contains)"),
-    selector: z.string().optional().describe("CSS selector for the list container"),
-    timeout: z.string().optional().describe("Timeout in ms (default: 10000)")
-  }, async (params) => ok(await sessionManager.expectList(params.session, params)));
-
-  server.tool("get-items", "Get text content of all items in a list", {
-    session: z.string().describe("Session ID"),
-    selector: z.string().optional().describe("CSS selector for the list container")
-  }, async (params) => ok(await sessionManager.getItems(params.session, params)));
-
-  server.tool("cookies", "Manage cookies", {
-    session: z.string().describe("Session ID"),
-    export: z.string().optional().describe("Export cookies to file"),
-    import: z.string().optional().describe("Import cookies from file")
-  }, async (params) => ok(await sessionManager.cookies(params.session, params)));
-
-  server.tool("download", "Download a file", {
-    session: z.string().describe("Session ID"),
-    url: z.string().describe("URL to download"),
-    output: z.string().describe("Output file path")
-  }, async (params) => ok(await sessionManager.download(params.session, params)));
-
-  server.tool("set-scope", "Restrict subsequent commands to elements within a CSS selector", {
-    session: z.string().describe("Session ID"),
-    selector: z.string().describe("CSS selector to scope to")
-  }, async (params) => ok(sessionManager.setScope(params.session, params.selector)));
-
-  server.tool("clear-scope", "Clear the current scope restriction", {
-    session: z.string().describe("Session ID")
-  }, async (params) => ok(sessionManager.clearScope(params.session)));
-
-  server.tool("new-tab", "Open a new tab", {
-    session: z.string().describe("Session ID"),
-    url: z.string().optional().describe("URL to open in new tab")
-  }, async (params) => ok(await sessionManager.newTab(params.session, params.url)));
-
-  server.tool("switch-tab", "Switch to a tab", {
-    session: z.string().describe("Session ID"),
-    tab: z.number().describe("Tab index")
-  }, async (params) => ok(await sessionManager.switchTab(params.session, params.tab)));
-
-  server.tool("close-tab", "Close a tab", {
-    session: z.string().describe("Session ID"),
-    tab: z.number().describe("Tab index")
-  }, async (params) => ok(await sessionManager.closeTab(params.session, params.tab)));
-
-  server.tool("list-tabs", "List tabs in a session", {
-    session: z.string().describe("Session ID")
-  }, async (params) => ok(sessionManager.listTabs(params.session)));
-
-  server.tool("execute", "Execute a batch of instructions", {
-    session: z.string().describe("Session ID"),
-    instructions: z.array(z.object({
-      method: z.string(),
-      params: z.record(z.string()).optional()
-    })).describe("Array of {method, params} instructions")
-  }, async (params) => ok(await sessionManager.execute(params.session, params.instructions)));
-
-  const transport = new StdioServerTransport();
-  await server.connect(transport);
+async function ReadCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("read", {
+    url: params.url,
+    session: params.session,
+    format: params.format,
+    waitUntil: params.waitUntil,
+    output: params.output
+  });
+  console.log(JSON.stringify(result));
 }
 
 const args = process.argv.slice(2);
@@ -1988,21 +2122,22 @@ const values = args.slice(1);
 const commands = {
   start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
-  visit:       { handler: VisitCommand,    args: ["session", "url"] },
+  visit:       { handler: VisitCommand,    args: ["session", "url", "waitUntil"] },
   back:        { handler: BackCommand,     args: ["session"] },
   forward:     { handler: ForwardCommand,  args: ["session"] },
   reload:      { handler: ReloadCommand,   args: ["session"] },
-  click:       { handler: ClickCommand,    args: ["session", "name", "role"] },
+  click:       { handler: ClickCommand,    args: ["session", "name", "role", "index", "ref"] },
   "click-selector": { handler: ClickSelectorCommand, args: ["session", "selector"] },
-  "click-text": { handler: ClickTextCommand, args: ["session", "text"] },
+  "click-text": { handler: ClickTextCommand, args: ["session", "text", "index"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
   type:        { handler: TypeCommand,     args: ["session", "name", "value", "role"] },
-  scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount"] },
-  content:     { handler: ContentCommand,  args: ["session", "selector", "format"] },
+  scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount", "to"] },
+  content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output"] },
   screenshot:  { handler: ScreenshotCommand, args: ["session", "output", "fullPage"] },
+  read:        { handler: ReadCommand,     args: ["url", "session", "format", "waitUntil", "output"] },
   wait:        { handler: WaitCommand,     args: ["session", "selector", "timeout"] },
   eval:        { handler: EvalCommand,     args: ["session", "script"] },
   expect:      { handler: ExpectCommand,  args: ["session", "selector", "assertion", "expected", "timeout"] },
@@ -2015,18 +2150,18 @@ const commands = {
   check:       { handler: CheckCommand,    args: ["session", "name", "role"] },
   uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role"] },
   hover:       { handler: HoverCommand,    args: ["session", "name", "role"] },
-  press:       { handler: PressCommand,    args: ["session", "key"] },
+  press:       { handler: PressCommand,    args: ["session", "key", "selector"] },
   clear:       { handler: ClearCommand,    args: ["session", "name", "role"] },
   upload:      { handler: UploadCommand,   args: ["session", "name", "file"] },
   "set-scope": { handler: SetScopeCommand, args: ["session", "selector"] },
   "clear-scope": { handler: ClearScopeCommand, args: ["session"] },
+  "set-snapshot": { handler: SetSnapshotCommand, args: ["session", "mode"] },
   component:   { handler: ComponentCommand, args: ["session", "type", "action", "name", "row", "col", "where", "item", "field", "fields", "value", "tab", "path", "title", "timeout"] },
-  snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format"] },
+  snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format", "output"] },
   "new-tab":   { handler: NewTabCommand,   args: ["session", "url"] },
   "switch-tab": { handler: SwitchTabCommand, args: ["session", "tab"] },
   "close-tab": { handler: CloseTabCommand, args: ["session", "tab"] },
   "list-tabs": { handler: ListTabsCommand, args: ["session"] },
-  mcp:         { handler: McpCommand,      args: [] }
 };
 
 const command = commands[action];

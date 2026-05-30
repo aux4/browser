@@ -5,9 +5,12 @@ export async function SnapshotCommand(params) {
   const result = await client.send("snapshot", {
     session: params.session,
     mode: params.mode,
-    format: params.format
+    format: params.format,
+    output: params.output
   });
-  if (params.format === "text" && result.text != null) {
+  if (params.output) {
+    console.log(JSON.stringify(result));
+  } else if (params.format === "text" && result.text != null) {
     console.log(result.text);
   } else {
     console.log(JSON.stringify(result));

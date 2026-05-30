@@ -1,8 +1,24 @@
 actions:
+  - expression: "go to {url} wait until {strategy}"
+    execute: "aux4 browser visit --session {{session}} --url ${url} --waitUntil ${strategy}"
   - expression: "go to {url}"
     execute: "aux4 browser visit --session {{session}} --url ${url}"
+  - expression: "visit {url} wait until {strategy}"
+    execute: "aux4 browser visit --session {{session}} --url ${url} --waitUntil ${strategy}"
   - expression: "visit {url}"
     execute: "aux4 browser visit --session {{session}} --url ${url}"
+  - expression: "read {url} as {format}"
+    execute: "aux4 browser read --url ${url} --session {{session}} --format ${format}"
+  - expression: "read {url}"
+    execute: "aux4 browser read --url ${url} --session {{session}}"
+  - expression: "click on ref {ref}"
+    execute: "aux4 browser click --session {{session}} --ref ${ref}"
+    params:
+      ref: \d+
+  - expression: "click on element {ref}"
+    execute: "aux4 browser click --session {{session}} --ref ${ref}"
+    params:
+      ref: \d+
   - expression: "click on {name} button"
     execute: "aux4 browser click --session {{session}} --name ${name}"
   - expression: "click on {name} link"
@@ -45,6 +61,18 @@ actions:
     execute: "aux4 browser clear --session {{session}} --name ${name}"
   - expression: "upload {file} to {name}"
     execute: "aux4 browser upload --session {{session}} --name ${name} --file ${file}"
+  - expression: "wait for text {text} for {timeout} seconds"
+    execute: "aux4 browser wait --session {{session}} --selector text=${text} --timeout ${timeout}000"
+    params:
+      timeout: \d+
+  - expression: "wait for text {text}"
+    execute: "aux4 browser wait --session {{session}} --selector text=${text}"
+  - expression: "wait for url {pattern}"
+    execute: "aux4 browser wait --session {{session}} --selector url=${pattern}"
+  - expression: "wait for networkidle"
+    execute: "aux4 browser wait --session {{session}} --selector networkidle"
+  - expression: "wait for settle"
+    execute: "aux4 browser wait --session {{session}} --selector settle"
   - expression: "wait for {selector} for {timeout} seconds"
     execute: "aux4 browser wait --session {{session}} --selector ${selector} --timeout ${timeout}000"
     params:

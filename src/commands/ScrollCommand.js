@@ -5,7 +5,8 @@ export async function ScrollCommand(params) {
   const result = await client.send("scroll", {
     session: params.session,
     direction: params.direction,
-    amount: params.amount
+    amount: params.amount,
+    to: params.to
   });
   console.log(JSON.stringify(result));
 }
