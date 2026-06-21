@@ -4,7 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
-import { webkit, firefox, chromium } from 'playwright';
+import { chromium, webkit, firefox } from 'playwright';
 
 class ContentExtractor {
   static async extract(page, options = {}) {
@@ -414,6 +414,19 @@ class SessionManager {
     this.sessions = new Map();
     this.maxSessions = options.maxSessions || 20;
     this.onEmpty = options.onEmpty || (() => {});
+    this.channel = options.channel || "";
+    this.browserName = options.browser || "";
+  }
+
+  async _allocatePort() {
+    return new Promise((resolve, reject) => {
+      const server = net.createServer();
+      server.on("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        const { port } = server.address();
+        server.close(() => resolve(port));
+      });
+    });
   }
 
   _writeArtifact(name, content, outputPath) {
@@ -537,21 +550,51 @@ class SessionManager {
     const timeout = this.parseTimeout(params.timeout || "10m");
     const outputDir = params.output || "";
     const videoMode = params.video || "off";
+    const width = parseInt(params.width) || 1280;
+    const height = parseInt(params.height) || 720;
+    const auditable = params.auditable === true || params.auditable === "true";
 
-    const contextOptions = {
-      viewport: {
-        width: parseInt(params.width) || 1280,
-        height: parseInt(params.height) || 720
+    let context;
+    let page;
+    let cdpPort = null;
+    let userDataDir = null;
+
+    if (auditable) {
+      // Auditable sessions launch a dedicated persistent Chromium with a remote
+      // debugging port so external CDP tools (e.g. Lighthouse) can attach to the
+      // same default profile and inherit cookies + localStorage.
+      if (this.browserName && this.browserName !== "chromium") {
+        throw new Error("auditable sessions require chromium");
       }
-    };
-    if (outputDir && videoMode !== "off") {
-      const videoDir = path.join(outputDir, "videos");
-      fs.mkdirSync(videoDir, { recursive: true });
-      contextOptions.recordVideo = { dir: videoDir };
+      cdpPort = await this._allocatePort();
+      userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "aux4-browser-audit-"));
+      const launchOptions = {
+        headless: true,
+        args: [`--remote-debugging-port=${cdpPort}`],
+        viewport: { width, height }
+      };
+      if (this.channel) launchOptions.channel = this.channel;
+      if (outputDir && videoMode !== "off") {
+        const videoDir = path.join(outputDir, "videos");
+        fs.mkdirSync(videoDir, { recursive: true });
+        launchOptions.recordVideo = { dir: videoDir };
+      }
+      context = await chromium.launchPersistentContext(userDataDir, launchOptions);
+      const existing = context.pages();
+      page = existing.length > 0 ? existing[0] : await context.newPage();
+    } else {
+      const contextOptions = {
+        viewport: { width, height }
+      };
+      if (outputDir && videoMode !== "off") {
+        const videoDir = path.join(outputDir, "videos");
+        fs.mkdirSync(videoDir, { recursive: true });
+        contextOptions.recordVideo = { dir: videoDir };
+      }
+      context = await this.browser.newContext(contextOptions);
+      page = await context.newPage();
     }
-    const context = await this.browser.newContext(contextOptions);
 
-    const page = await context.newPage();
     let response = null;
     if (params.url && params.url !== "") {
       response = await this._navigate(page, params.url, params.waitUntil);
@@ -562,13 +605,24 @@ class SessionManager {
       id, context, pages: [page], activeTab: 0,
       timeout, createdAt: Date.now(), lastActivity: Date.now(),
       timer: setTimeout(() => this.close(id), timeout),
-      outputDir, videoMode, hadError: false, snapshotMode
+      outputDir, videoMode, hadError: false, snapshotMode,
+      auditable, cdpPort, userDataDir
     };
 
     this.sessions.set(id, session);
     const result = { sessionId: id, ...(await this._pageInfoAsync(page, response)) };
+    if (auditable) result.cdpPort = cdpPort;
     await this._attachSnapshot(session, result);
     return result;
+  }
+
+  inspect(sessionId) {
+    const session = this.getSession(sessionId);
+    if (!session.auditable || !session.cdpPort) {
+      throw new Error("Session is not auditable. Open it with: aux4 browser open --auditable true");
+    }
+    const page = session.pages[session.activeTab];
+    return { url: page.url(), port: session.cdpPort };
   }
 
   async _attachSnapshot(session, result, overrideMode) {
@@ -620,6 +674,11 @@ class SessionManager {
     // Clean up video on success for retain-on-failure mode
     for (const vpath of videoPaths) {
       try { if (fs.existsSync(vpath)) fs.unlinkSync(vpath); } catch {}
+    }
+
+    // Auditable sessions own a dedicated persistent-context user-data-dir.
+    if (session.auditable && session.userDataDir) {
+      try { fs.rmSync(session.userDataDir, { recursive: true, force: true }); } catch {}
     }
 
     this.sessions.delete(sessionId);
@@ -1422,6 +1481,8 @@ class DaemonServer {
     this.browser = await BrowserEngine.launch(launchOptions);
     this.sessionManager = new SessionManager(this.browser, {
       maxSessions: this.maxSessions,
+      channel: this.channel,
+      browser: this.browserName,
       onEmpty: () => {
         if (!this.persistent) this.stop();
       }
@@ -1486,6 +1547,7 @@ class DaemonServer {
 
     switch (method) {
       case "open": return this.sessionManager.open(params);
+      case "inspect": return this.sessionManager.inspect(params.session);
       case "close": return this.sessionManager.close(params.session);
       case "list": return this.sessionManager.list();
       case "visit": return this.sessionManager.visit(params.session, params.url, params.waitUntil);
@@ -1698,13 +1760,22 @@ async function OpenCommand(params) {
     output: params.output,
     video: params.video,
     snapshot: params.snapshot,
-    waitUntil: params.waitUntil
+    waitUntil: params.waitUntil,
+    auditable: params.auditable
   });
   if (result.snapshot) {
     console.log(JSON.stringify(result));
   } else {
     console.log(result.sessionId);
   }
+}
+
+async function InspectCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("inspect", {
+    session: params.session
+  });
+  console.log(JSON.stringify(result));
 }
 
 async function CloseCommand(params) {
@@ -2122,7 +2193,8 @@ const values = args.slice(1);
 const commands = {
   start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil", "auditable"] },
+  inspect:     { handler: InspectCommand,  args: ["session"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
   visit:       { handler: VisitCommand,    args: ["session", "url", "waitUntil"] },

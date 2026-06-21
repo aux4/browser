@@ -76,7 +76,7 @@
         {
           "name": "open",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil)"
+            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil,auditable)"
           ],
           "help": {
             "text": "Open a new browser session",
@@ -120,6 +120,27 @@
                 "name": "waitUntil",
                 "text": "Navigation wait strategy: domcontentloaded, load, networkidle, settle",
                 "default": "load"
+              },
+              {
+                "name": "auditable",
+                "text": "Launch as a persistent context with a remote debugging port so external CDP tools (e.g. aux4 lighthouse) can attach to the authenticated session. Requires chromium.",
+                "default": "false"
+              }
+            ]
+          }
+        },
+        {
+          "name": "inspect",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs inspect values(session)"
+          ],
+          "help": {
+            "text": "Print the CDP connection handshake for an auditable session",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
               }
             ]
           }
