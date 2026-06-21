@@ -30,6 +30,8 @@ export class DaemonServer {
     this.browser = await BrowserEngine.launch(launchOptions);
     this.sessionManager = new SessionManager(this.browser, {
       maxSessions: this.maxSessions,
+      channel: this.channel,
+      browser: this.browserName,
       onEmpty: () => {
         if (!this.persistent) this.stop();
       }
@@ -94,6 +96,7 @@ export class DaemonServer {
 
     switch (method) {
       case "open": return this.sessionManager.open(params);
+      case "inspect": return this.sessionManager.inspect(params.session);
       case "close": return this.sessionManager.close(params.session);
       case "list": return this.sessionManager.list();
       case "visit": return this.sessionManager.visit(params.session, params.url, params.waitUntil);

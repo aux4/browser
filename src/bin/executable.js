@@ -1,6 +1,7 @@
 import { StartCommand } from "../commands/StartCommand.js";
 import { StopCommand } from "../commands/StopCommand.js";
 import { OpenCommand } from "../commands/OpenCommand.js";
+import { InspectCommand } from "../commands/InspectCommand.js";
 import { CloseCommand } from "../commands/CloseCommand.js";
 import { ListCommand } from "../commands/ListCommand.js";
 import { VisitCommand } from "../commands/GotoCommand.js";
@@ -43,7 +44,8 @@ const values = args.slice(1);
 const commands = {
   start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil", "auditable"] },
+  inspect:     { handler: InspectCommand,  args: ["session"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
   visit:       { handler: VisitCommand,    args: ["session", "url", "waitUntil"] },

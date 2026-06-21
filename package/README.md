@@ -247,6 +247,26 @@ aux4 browser switch-tab --session <id> --tab 1
 aux4 browser close-tab --session <id> --tab 1
 ```
 
+### Authenticated Lighthouse Audit
+
+Normal sessions run in an isolated context, so an external Chrome tool would only ever see a logged-out page. Open the session with `--auditable true` to launch it as a persistent context that exposes a CDP remote debugging port. After logging in, `aux4 browser inspect` prints the connection handshake (the current URL and the live port), which an external tool can attach to — inheriting the session's cookies **and** localStorage.
+
+```bash
+# Open an auditable session and log in
+SID=$(aux4 browser open --auditable true --url https://app.example.com/login)
+aux4 browser type --session $SID --name Email --value user@test.com
+aux4 browser type --session $SID --name Password --value secret
+aux4 browser click --session $SID --name "Sign In"
+
+# Print the CDP handshake and hand it to an authenticated audit
+aux4 browser inspect --session $SID
+# {"url":"https://app.example.com/dashboard","port":63718}
+
+aux4 browser inspect --session $SID | aux4 lighthouse audit --fromBrowser true
+```
+
+`inspect` emits exactly one compact JSON object (`{"url":...,"port":...}`) and nothing else, so it pipes cleanly into a downstream consumer. **Auditable sessions require the chromium engine** — they cannot be opened when the daemon was started with firefox or webkit.
+
 ### Run (One-Shot Mode)
 
 Run instructions without managing a daemon. Launches a browser, executes, and exits:
