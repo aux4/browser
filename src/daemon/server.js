@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { SessionManager } from "./SessionManager.js";
 import { BrowserEngine } from "./BrowserEngine.js";
+import { ensureBrowserInstalled } from "./BrowserInstaller.js";
 
 const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
 const SOCKET_PATH = path.join(SOCKET_DIR, "browser.sock");
@@ -23,6 +24,11 @@ export class DaemonServer {
   async start() {
     fs.mkdirSync(SOCKET_DIR, { recursive: true });
     if (fs.existsSync(SOCKET_PATH)) fs.unlinkSync(SOCKET_PATH);
+
+    // Defensive self-heal for when the daemon is launched directly (not via the
+    // StartCommand parent, which already provisions the browser). No-op/quiet
+    // when the browser is already present.
+    ensureBrowserInstalled(this.browserName || "chromium");
 
     const launchOptions = {};
     if (this.channel) launchOptions.channel = this.channel;

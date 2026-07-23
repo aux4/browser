@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 import { DaemonServer } from "../daemon/server.js";
+import { ensureBrowserInstalled } from "../daemon/BrowserInstaller.js";
 
 const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
 const SOCKET_PATH = path.join(SOCKET_DIR, "browser.sock");
@@ -56,6 +57,11 @@ export async function StartCommand(params) {
     console.log(JSON.stringify({ status: "already_running" }));
     return;
   }
+
+  // Self-provision the browser binary in the foreground (before forking the
+  // detached daemon) so the "installing…" notice is visible to the user and the
+  // daemon child never blocks on a download while waitForSocket() is ticking.
+  ensureBrowserInstalled(params.browser || "chromium");
 
   // Fork the daemon to the background
   const child = spawn(process.execPath, process.argv.slice(1), {

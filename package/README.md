@@ -6,8 +6,25 @@ Headless browser automation with daemon architecture and multi-agent session man
 
 ```bash
 aux4 aux4 pkger install aux4/browser
-npx playwright install chromium
 ```
+
+That's it — no separate `npx playwright install chromium` step. The first time you
+run `aux4 browser start`, the daemon detects whether Playwright's chromium binary
+is present and, if it is missing, downloads it automatically (a one-time step,
+printed to stderr). Subsequent starts are silent and instant.
+
+On Linux, chromium also needs a set of OS shared libraries. Those are declared in
+the package `system` field and installed by the aux4 system installer when a
+matching one (apt / dnf / apk) is available. In containers/CI, bake the libraries
+in at image-build time as root with:
+
+```bash
+playwright install-deps chromium
+```
+
+**Note:** the chromium *binary* is a Playwright download (not an OS package), so it
+is provisioned by the daemon in code — no root required. The `system` field only
+covers the OS libraries and is a no-op on macOS (where chromium is self-contained).
 
 ## Architecture
 
