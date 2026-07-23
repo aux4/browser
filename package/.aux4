@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.14",
+  "version": "1.0.21",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -152,7 +152,7 @@
         {
           "name": "start",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs start values(maxSessions,persistent,channel,browser)"
+            "node ${packageDir}/lib/aux4-browser.mjs start values(maxSessions,persistent,channel,browser,headed)"
           ],
           "help": {
             "text": "Start the browser daemon",
@@ -176,6 +176,11 @@
                 "name": "browser",
                 "text": "Browser engine: chromium, firefox, webkit",
                 "default": "chromium"
+              },
+              {
+                "name": "headed",
+                "text": "Run a visible (headed) browser window instead of headless — strongly reduces bot detection",
+                "default": "false"
               }
             ]
           }
@@ -342,7 +347,7 @@
         {
           "name": "click",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs click values(session,name,role,index,ref)"
+            "node ${packageDir}/lib/aux4-browser.mjs click values(session,name,role,index,ref,within)"
           ],
           "help": {
             "text": "Click an element by role+name or snapshot ref index",
@@ -371,6 +376,11 @@
                 "name": "ref",
                 "text": "Snapshot ref index (from snapshot command), overrides name/role",
                 "default": ""
+              },
+              {
+                "name": "within",
+                "text": "Optional iframe CSS selector to click inside (frameLocator); nest with >>>",
+                "default": ""
               }
             ]
           }
@@ -378,7 +388,7 @@
         {
           "name": "click-selector",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs click-selector values(session,selector)"
+            "node ${packageDir}/lib/aux4-browser.mjs click-selector values(session,selector,within)"
           ],
           "help": {
             "text": "Click an element by CSS selector",
@@ -392,6 +402,57 @@
                 "name": "selector",
                 "text": "CSS selector to click",
                 "required": true
+              },
+              {
+                "name": "within",
+                "text": "Optional iframe CSS selector to click inside (frameLocator); nest with >>>",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "mouse",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs mouse values(session,action,x,y,steps,selector,within)"
+          ],
+          "help": {
+            "text": "Drive the real mouse at viewport coordinates with a human-like trajectory",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "action",
+                "text": "move | click | down | up",
+                "default": "click"
+              },
+              {
+                "name": "x",
+                "text": "Target viewport X coordinate (ignored when --selector is given)",
+                "default": "0"
+              },
+              {
+                "name": "y",
+                "text": "Target viewport Y coordinate (ignored when --selector is given)",
+                "default": "0"
+              },
+              {
+                "name": "steps",
+                "text": "Number of intermediate move steps (higher = smoother/slower)",
+                "default": "20"
+              },
+              {
+                "name": "selector",
+                "text": "Optional CSS selector to aim at the element's center instead of x/y",
+                "default": ""
+              },
+              {
+                "name": "within",
+                "text": "Optional iframe CSS selector to resolve the selector inside (frameLocator)",
+                "default": ""
               }
             ]
           }
@@ -399,7 +460,7 @@
         {
           "name": "click-text",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs click-text values(session,text,index)"
+            "node ${packageDir}/lib/aux4-browser.mjs click-text values(session,text,index,within)"
           ],
           "help": {
             "text": "Click an element by its text content",
@@ -418,6 +479,11 @@
                 "name": "index",
                 "text": "1-based index when multiple elements match",
                 "default": ""
+              },
+              {
+                "name": "within",
+                "text": "Optional iframe CSS selector to click inside (frameLocator); nest with >>>",
+                "default": ""
               }
             ]
           }
@@ -425,7 +491,7 @@
         {
           "name": "type",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role)"
+            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,within)"
           ],
           "help": {
             "text": "Type text into an input field",
@@ -451,6 +517,11 @@
                 "name": "role",
                 "text": "ARIA role",
                 "default": "textbox"
+              },
+              {
+                "name": "within",
+                "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
+                "default": ""
               }
             ]
           }
