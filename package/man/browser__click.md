@@ -8,11 +8,13 @@ Two modes:
 
 On timeout, returns `{clicked: false, reason: "timeout", description, currentUrl, title}` instead of an error.
 
+Use `--within <iframe-css>` to click inside an iframe. The default main-frame search cannot reach iframe content; `--within` resolves the element inside the frame via Playwright's frameLocator. Nest frames by joining selectors with `>>>`.
+
 #### Usage
 
 ```bash
 aux4 browser click --session <id> --ref <n>
-aux4 browser click --session <id> --name <name> [--role button] [--index <n>]
+aux4 browser click --session <id> --name <name> [--role button] [--index <n>] [--within <iframe-css>]
 ```
 
     --session   Session ID (required)
@@ -20,6 +22,7 @@ aux4 browser click --session <id> --name <name> [--role button] [--index <n>]
     --role      ARIA role (default: button)
     --index     1-based index when multiple elements match
     --ref       Snapshot ref index (from snapshot command), overrides name/role
+    --within    Optional iframe CSS selector to click inside (frameLocator); nest with >>>
 
 #### Example
 

@@ -96,6 +96,33 @@ aux4 browser clear --session <id> --name "Search"
 aux4 browser upload --session <id> --name "Avatar" --file photo.jpg
 ```
 
+#### Real mouse movement
+
+`mouse` drives the cursor at viewport coordinates with a human-like multi-step trajectory (rather than teleporting to an element). Useful for sites that score pointer behavior, and it clicks whatever is at the coordinate (iframe content included).
+
+```bash
+# Glide toward a point, then click another point
+aux4 browser mouse --session <id> --action move --x 120 --y 300 --steps 25
+aux4 browser mouse --session <id> --action click --x 240 --y 360 --steps 18
+
+# Or click an element by selector (center), even inside an iframe
+aux4 browser mouse --session <id> --action click --selector "#submit" --within "iframe#checkout"
+```
+
+In playbooks this is available as `move mouse to {x} {y}`, `click mouse at {x} {y}`, `click mouse on {selector}`, and `click mouse on {selector} in {within}`. Note: from a playbook, target ids with `[id="submit"]` rather than `#submit` (the playbook engine treats `#` as a comment).
+
+#### Working inside iframes
+
+By default the interaction commands search the **main frame** and cannot reach content rendered inside an iframe — the click or type times out. Add `--within <iframe-css>` to `click`, `click-selector`, `click-text`, or `type` to scope the action **inside** that iframe (Playwright's frameLocator), which reaches the frame's document and dispatches a real, auto-waited event. Nest multiple frames by joining their selectors with `>>>`.
+
+```bash
+# Click a button that lives inside an iframe
+aux4 browser click-selector --session <id> --selector "#submit" --within "iframe#checkout"
+
+# Type into a field inside a nested iframe
+aux4 browser type --session <id> --name "Card number" --value "4242..." --within "iframe.outer >>> iframe.inner"
+```
+
 ### Scrolling
 
 ```bash
@@ -302,6 +329,44 @@ get content
 ```bash
 aux4 playbook execute script.txt
 ```
+
+## reCAPTCHA
+
+`aux4 browser recaptcha` solves reCAPTCHA "select all images" challenges in an open session. It is designed as a **human-in-the-loop** flow: the agent does not guess the challenge itself (image challenges are ambiguous and a wrong guess wastes the short-lived challenge) — it shows the image to the user, asks which tiles match, and clicks them. Selection and verification use **real mouse movement** inside the challenge iframe, which is what reCAPTCHA's behavioral scoring expects (synthetic clicks are scored as bot activity and never yield a token).
+
+| Command | Description |
+|---------|-------------|
+| `aux4 browser recaptcha open --session <id>` | Click the checkbox; reload + retry if expired |
+| `aux4 browser recaptcha show --session <id>` | Wait for the grid + images, screenshot, open it locally |
+| `aux4 browser recaptcha category --session <id>` | Print the prompt (e.g. `bicycles`) |
+| `aux4 browser recaptcha status --session <id>` | Print JSON `{state, token, tiles, prompt}` (state: `challenge`/`expired`/`solved`) |
+| `aux4 browser recaptcha select --session <id> --tiles 2,5,9` | Mouse-click the 1-based tiles, then verify |
+| `aux4 browser recaptcha verify --session <id>` | Mouse-click verify/skip with no selection |
+| `aux4 browser recaptcha solved --session <id>` | Print `true`/`false` (non-zero exit on `false`) |
+| `aux4 browser recaptcha token --session <id>` | Print the `g-recaptcha-response` token |
+
+### Agent loop (human-in-the-loop)
+
+1. `aux4 browser recaptcha open --session $S`
+2. `aux4 browser recaptcha status --session $S` — `solved` → step 6; `expired` → step 1; `challenge` → continue.
+3. `aux4 browser recaptcha show --session $S` (opens the image) and `recaptcha category` (what to find). `status.tiles` gives the grid size (9 = 3×3, 16 = 4×4).
+4. **Ask the user** which squares match the category — reply with numbers, or `none`.
+5. `aux4 browser recaptcha select --session $S --tiles 2,5,9` (or `verify` for `none`), then **back to step 2**. Dynamic challenges reload new images in solved tiles, so re-show and re-ask each round; use `recaptcha solved` (not a round count) as the stop condition.
+6. `aux4 browser recaptcha token --session $S` — hand the token to your form / back-end. This does **not** submit the host page.
+
+Tile numbers are 1-based, left-to-right, top-to-bottom:
+
+```text
+3×3:            4×4:
+ 1 2 3           1  2  3  4
+ 4 5 6           5  6  7  8
+ 7 8 9           9 10 11 12
+                13 14 15 16
+```
+
+The same verbs are available as playbook actions: `open recaptcha`, `show recaptcha grid`, `recaptcha category`, `recaptcha status`, `select recaptcha tiles {tiles}`, `verify recaptcha`, `recaptcha solved`, `recaptcha token`.
+
+**Note:** Headless sessions with no prior reputation may be challenged repeatedly and, in some cases, never issued a token regardless of correct answers — surface that to the user rather than looping forever.
 
 ## Options
 
