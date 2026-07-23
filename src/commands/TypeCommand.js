@@ -16,7 +16,8 @@ export async function TypeCommand(params) {
       session: params.session,
       name: names[i],
       value: values[i],
-      role: params.role
+      role: params.role,
+      within: params.within
     });
   }
   console.log(JSON.stringify(result));

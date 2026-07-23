@@ -17,7 +17,7 @@ For containers, bake them in at build time with `playwright install-deps chromiu
 ## Usage
 
 ```
-aux4 browser start [--maxSessions 20] [--persistent false] [--browser chromium]
+aux4 browser start [--maxSessions 20] [--persistent false] [--browser chromium] [--channel <name>] [--headed false]
 ```
 
 ## Options
@@ -25,3 +25,15 @@ aux4 browser start [--maxSessions 20] [--persistent false] [--browser chromium]
 - `--maxSessions` — Maximum concurrent sessions (default: 20)
 - `--persistent` — Keep daemon running when all sessions close (default: false)
 - `--browser` — Playwright engine to launch and provision (default: chromium)
+- `--channel` — Browser channel to launch (e.g. `chrome`, `msedge`); empty uses the bundled build
+- `--headed` — Run a visible (headed) browser window instead of headless (default: false). A headed window strongly reduces bot detection versus headless.
+
+## Example
+
+```bash
+aux4 browser start --headed true
+```
+
+```text
+{"status":"started","pid":25271}
+```

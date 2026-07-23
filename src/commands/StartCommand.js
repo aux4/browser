@@ -46,7 +46,8 @@ export async function StartCommand(params) {
       maxSessions: parseInt(params.maxSessions) || 20,
       persistent: params.persistent === "true" || params.persistent === true,
       channel: params.channel || "",
-      browser: params.browser || ""
+      browser: params.browser || "",
+      headed: params.headed === "true" || params.headed === true
     });
     await server.start();
     return;

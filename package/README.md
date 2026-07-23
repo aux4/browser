@@ -400,6 +400,7 @@ The same verbs are available as playbook actions: `open recaptcha`, `show recapt
 | `--format` | markdown | Content format: `markdown`, `html`, `text` |
 | `--channel` | | Browser channel (e.g. `chrome`, `msedge`) |
 | `--browser` | chromium | Browser engine: `chromium`, `firefox`, `webkit` |
+| `--headed` | false | Run a visible (headed) window instead of headless (strongly reduces bot detection) |
 
 ## License
 

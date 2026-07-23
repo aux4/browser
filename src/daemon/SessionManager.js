@@ -42,9 +42,20 @@ export class SessionManager {
     return session;
   }
 
-  getBase(session) {
+  getBase(session, params = {}) {
     const page = session.pages[session.activeTab];
-    return session.scope ? page.locator(session.scope) : page;
+    // --within scopes subsequent locators INSIDE an iframe via frameLocator,
+    // which (unlike page.locator on the iframe element) can reach the frame's
+    // document and dispatches real, auto-waited events. Supports nested frames
+    // by splitting the selector on ">>>".
+    let base = page;
+    const within = params.within;
+    if (within) {
+      for (const sel of String(within).split(">>>").map(s => s.trim()).filter(Boolean)) {
+        base = base.frameLocator(sel);
+      }
+    }
+    return session.scope ? base.locator(session.scope) : base;
   }
 
   setScope(sessionId, selector) {
@@ -352,7 +363,7 @@ export class SessionManager {
       return this._attachSnapshot(session, { status: "ok" });
     }
 
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "button";
     const locator = base.getByRole(role, { name: params.name });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
@@ -361,14 +372,51 @@ export class SessionManager {
 
   async clickSelector(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     return this._clickWithTimeout(session, base.locator(params.selector).first(), timeout, `selector="${params.selector}"`);
   }
 
+  // Drive the real mouse via CDP at viewport coordinates, with a human-like
+  // multi-step trajectory. Unlike locator.click() (which teleports to the
+  // element), this moves the cursor through intermediate points so behavioral
+  // bot-detection sees natural movement. Works across iframes because it
+  // targets page-space coordinates, not a frame-scoped element.
+  async mouse(sessionId, params) {
+    const session = this.getSession(sessionId);
+    const page = session.pages[session.activeTab];
+    const action = params.action || "click";
+    let x = parseFloat(params.x);
+    let y = parseFloat(params.y);
+    // When a selector is given, resolve the element's page-space box (honoring
+    // --within for iframes) and aim at its center, so callers can mouse-click an
+    // element by selector without computing coordinates themselves.
+    if (params.selector) {
+      const base = this.getBase(session, params);
+      const box = await base.locator(params.selector).first().boundingBox({ timeout: parseInt(params.timeout) || 5000 });
+      if (!box) return { status: "error", reason: "selector not found", selector: params.selector };
+      x = box.x + box.width / 2;
+      y = box.y + box.height / 2;
+    }
+    const steps = parseInt(params.steps) || 20;
+    if (action === "move") {
+      await page.mouse.move(x, y, { steps });
+    } else if (action === "down") {
+      await page.mouse.down();
+    } else if (action === "up") {
+      await page.mouse.up();
+    } else {
+      // click: glide to the point over several steps, then press
+      await page.mouse.move(x, y, { steps });
+      await page.mouse.down();
+      await page.mouse.up();
+    }
+    return { status: "ok", action, x: Math.round(x), y: Math.round(y) };
+  }
+
   async clickText(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const locator = base.getByText(params.text, { exact: false });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
     const timeout = parseInt(params.timeout) || 5000;
@@ -377,7 +425,7 @@ export class SessionManager {
 
   async type(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).fill(params.value);
     return this._attachSnapshot(session, { status: "ok" });
@@ -387,7 +435,7 @@ export class SessionManager {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     if (params.to) {
-      const base = this.getBase(session);
+      const base = this.getBase(session, params);
       await base.getByText(params.to, { exact: false }).first().scrollIntoViewIfNeeded({ timeout: parseInt(params.timeout) || 5000 });
     } else if (params.direction === "top") {
       await page.evaluate(() => window.scrollTo(0, 0));
@@ -501,7 +549,7 @@ export class SessionManager {
       // text= mode: wait for text to appear
       if (selector.startsWith("text=")) {
         const text = selector.slice(5);
-        const base = this.getBase(session);
+        const base = this.getBase(session, params);
         await base.getByText(text, { exact: false }).first().waitFor({ state: "visible", timeout });
         return { status: "ok", mode: "text" };
       }
@@ -513,7 +561,7 @@ export class SessionManager {
       }
 
       // Default: CSS selector
-      const base = this.getBase(session);
+      const base = this.getBase(session, params);
       await base.locator(selector).first().waitFor({ state: "visible", timeout });
       return { status: "ok" };
     } catch (e) {
@@ -535,7 +583,7 @@ export class SessionManager {
   async expect(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const locator = base.locator(params.selector);
 
@@ -623,7 +671,7 @@ export class SessionManager {
 
   async select(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "combobox";
     await base.getByRole(role, { name: params.name }).selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
@@ -631,7 +679,7 @@ export class SessionManager {
 
   async check(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
@@ -639,7 +687,7 @@ export class SessionManager {
 
   async uncheck(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
@@ -647,7 +695,7 @@ export class SessionManager {
 
   async hover(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "button";
     await base.getByRole(role, { name: params.name }).hover({ timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
@@ -657,7 +705,7 @@ export class SessionManager {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     if (params.selector) {
-      const base = this.getBase(session);
+      const base = this.getBase(session, params);
       await base.locator(params.selector).first().focus({ timeout: parseInt(params.timeout) || 5000 });
     }
     await page.keyboard.press(params.key);
@@ -666,7 +714,7 @@ export class SessionManager {
 
   async clear(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).clear({ timeout: parseInt(params.timeout) || 5000 });
     return { status: "ok" };
@@ -674,7 +722,7 @@ export class SessionManager {
 
   async upload(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     await base.getByLabel(params.name).setInputFiles(params.file, { timeout: parseInt(params.timeout) || 5000 });
     return { status: "ok" };
   }
@@ -767,7 +815,7 @@ export class SessionManager {
 
   async clickItem(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const items = this._listItems(base, params.selector);
     const item = params.item;
@@ -783,7 +831,7 @@ export class SessionManager {
 
   async expectList(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 10000;
     const items = this._listItems(base, params.selector);
 
@@ -805,7 +853,7 @@ export class SessionManager {
 
   async getItems(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const items = this._listItems(base, params.selector);
     const count = await items.count();
     const result = [];
@@ -818,7 +866,7 @@ export class SessionManager {
 
   async component(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const type = params.type;
     if (!type) throw new Error("component: --type is required");
@@ -951,6 +999,7 @@ export class SessionManager {
       case "reload": return this.reload(sessionId);
       case "click": return this.click(sessionId, params);
       case "click-selector": return this.clickSelector(sessionId, params);
+      case "mouse": return this.mouse(sessionId, params);
       case "click-text": return this.clickText(sessionId, params);
       case "click-item": return this.clickItem(sessionId, params);
       case "type": return this.type(sessionId, params);

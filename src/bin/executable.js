@@ -9,6 +9,7 @@ import { ForwardCommand } from "../commands/ForwardCommand.js";
 import { ReloadCommand } from "../commands/ReloadCommand.js";
 import { ClickCommand } from "../commands/ClickCommand.js";
 import { ClickSelectorCommand } from "../commands/ClickSelectorCommand.js";
+import { MouseCommand } from "../commands/MouseCommand.js";
 import { ClickTextCommand } from "../commands/ClickTextCommand.js";
 import { ClickItemCommand } from "../commands/ClickItemCommand.js";
 import { ExpectListCommand } from "../commands/ExpectListCommand.js";
@@ -41,7 +42,7 @@ const action = args[0];
 const values = args.slice(1);
 
 const commands = {
-  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser"] },
+  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed"] },
   stop:        { handler: StopCommand,     args: [] },
   open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil"] },
   close:       { handler: CloseCommand,    args: ["session"] },
@@ -50,11 +51,12 @@ const commands = {
   back:        { handler: BackCommand,     args: ["session"] },
   forward:     { handler: ForwardCommand,  args: ["session"] },
   reload:      { handler: ReloadCommand,   args: ["session"] },
-  click:       { handler: ClickCommand,    args: ["session", "name", "role", "index", "ref"] },
-  "click-selector": { handler: ClickSelectorCommand, args: ["session", "selector"] },
-  "click-text": { handler: ClickTextCommand, args: ["session", "text", "index"] },
+  click:       { handler: ClickCommand,    args: ["session", "name", "role", "index", "ref", "within"] },
+  "click-selector": { handler: ClickSelectorCommand, args: ["session", "selector", "within"] },
+  mouse:       { handler: MouseCommand,    args: ["session", "action", "x", "y", "steps", "selector", "within"] },
+  "click-text": { handler: ClickTextCommand, args: ["session", "text", "index", "within"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
-  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role"] },
+  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "within"] },
   scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount", "to"] },
   content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output"] },
   screenshot:  { handler: ScreenshotCommand, args: ["session", "output", "fullPage"] },

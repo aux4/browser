@@ -16,6 +16,7 @@ export class DaemonServer {
     this.persistent = options.persistent || false;
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
+    this.headed = options.headed || false;
     this.sessionManager = null;
     this.server = null;
     this.browser = null;
@@ -33,6 +34,7 @@ export class DaemonServer {
     const launchOptions = {};
     if (this.channel) launchOptions.channel = this.channel;
     if (this.browserName) launchOptions.browser = this.browserName;
+    if (this.headed) launchOptions.headed = true;
     this.browser = await BrowserEngine.launch(launchOptions);
     this.sessionManager = new SessionManager(this.browser, {
       maxSessions: this.maxSessions,
@@ -109,6 +111,7 @@ export class DaemonServer {
       case "reload": return this.sessionManager.reload(params.session);
       case "click": return this.sessionManager.click(params.session, params);
       case "click-selector": return this.sessionManager.clickSelector(params.session, params);
+      case "mouse": return this.sessionManager.mouse(params.session, params);
       case "click-text": return this.sessionManager.clickText(params.session, params);
       case "click-item": return this.sessionManager.clickItem(params.session, params);
       case "type": return this.sessionManager.type(params.session, params);

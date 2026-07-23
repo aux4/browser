@@ -2302,7 +2302,7 @@ const commands = {
   reload:      { handler: ReloadCommand,   args: ["session"] },
   click:       { handler: ClickCommand,    args: ["session", "name", "role", "index", "ref", "within"] },
   "click-selector": { handler: ClickSelectorCommand, args: ["session", "selector", "within"] },
-  mouse:       { handler: MouseCommand, args: ["session", "action", "x", "y", "steps", "selector", "within"] },
+  mouse:       { handler: MouseCommand,    args: ["session", "action", "x", "y", "steps", "selector", "within"] },
   "click-text": { handler: ClickTextCommand, args: ["session", "text", "index", "within"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
   type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "within"] },
