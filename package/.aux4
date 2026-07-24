@@ -12,7 +12,7 @@
     [
       "test:chromium --version",
       "linux:chromium",
-      "brew:chromium"
+      "cask:chromium"
     ]
   ],
   "tags": [
