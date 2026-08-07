@@ -165,7 +165,8 @@ class SnapshotBuilder {
           const ref = document.getElementById(labelledBy);
           if (ref) return (ref.textContent || "").trim().slice(0, 120);
         }
-        if (el.tagName.toLowerCase() === "input" || el.tagName.toLowerCase() === "textarea") {
+        const tag = el.tagName.toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select") {
           if (el.id) {
             const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
             if (label) return (label.textContent || "").trim().slice(0, 120);
@@ -174,6 +175,12 @@ class SnapshotBuilder {
           if (parentLabel) return (parentLabel.textContent || "").trim().slice(0, 120);
           const placeholder = el.getAttribute("placeholder");
           if (placeholder) return placeholder.trim();
+          const controlTitle = el.getAttribute("title");
+          if (controlTitle) return controlTitle.trim();
+          // A form control's textContent is not its accessible name -- for <select> it is the
+          // concatenated option text, which no locator can match. Report nothing rather than a
+          // name that looks usable and is not.
+          return "";
         }
         const title = el.getAttribute("title");
         if (title) return title.trim();
@@ -409,6 +416,23 @@ class ComponentResolver {
 
 const ARTIFACTS_DIR = path.join(os.homedir(), ".aux4.config", "browser", "artifacts");
 
+// Which command drives which role -- used to point a failed target at the right one.
+const COMMAND_FOR_ROLE = {
+  textbox: "type",
+  searchbox: "type",
+  spinbutton: "type",
+  combobox: "select",
+  listbox: "select",
+  checkbox: "check",
+  radio: "check",
+  switch: "check",
+  button: "click",
+  link: "click",
+  menuitem: "click",
+  tab: "click",
+  option: "click"
+};
+
 class SessionManager {
   constructor(browser, options = {}) {
     this.browser = browser;
@@ -543,6 +567,32 @@ class SessionManager {
   async open(params = {}) {
     if (this.sessions.size >= this.maxSessions) {
       throw new Error(`Max sessions (${this.maxSessions}) reached`);
+    }
+
+    // `open` always creates a NEW context, so a second open on a host you already have a session
+    // for silently discards its cookies -- you are signed out without being told. That reads as
+    // navigation and is almost always meant as `visit`. Refuse and say so, naming the session to
+    // navigate. Only same-host collides; a genuinely different site is normal multi-session use.
+    if (params.url && !params.new) {
+      const host = (() => { try { return new URL(params.url).host; } catch { return null; } })();
+      if (host) {
+        for (const [id, session] of this.sessions) {
+          const current = session.pages[session.activeTab].url();
+          const openHost = (() => { try { return new URL(current).host; } catch { return null; } })();
+          if (openHost === host) {
+            return {
+              status: "error",
+              reason: "session-already-open",
+              session: id,
+              currentUrl: current,
+              hint: `Session ${id} is already open on ${host} (currently ${current}). `
+                + `Opening again would create a new session and lose its cookies -- you would be signed out. `
+                + `To go to another page in it: aux4 browser visit --session ${id} --url ${params.url}. `
+                + `If you really need a separate session, pass --new.`
+            };
+          }
+        }
+      }
     }
 
     const id = crypto.randomUUID().slice(0, 8);
@@ -680,20 +730,189 @@ class SessionManager {
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
-  async _clickWithTimeout(session, locator, timeout, description) {
+  // A click that matched nothing is where the page state is most needed, so the failure
+  // carries the elements that *are* clickable -- each with the ref that would have worked.
+  // Without them the caller only learns what did not match, which is a dead end.
+  async _candidates(session, role, limit = 20) {
     try {
-      await locator.click({ timeout });
+      const page = session.pages[session.activeTab];
+      const snapshot = await SnapshotBuilder.build(page, "auto");
+      if (!snapshot || !snapshot.elements) return [];
+      return snapshot.elements
+        .filter(e => !role || e.role === role)
+        .map(e => ({ ref: e.ref, role: e.role, name: e.name }))
+        .slice(0, limit);
+    } catch {
+      return [];
+    }
+  }
+
+  // A name can be present while the role is wrong -- "Role" is a combobox, not a textbox, so
+  // `type` waits for something that will never appear. Saying which role the name actually has,
+  // and which command handles that role, turns a dead end into a next step.
+  async _targetFailure(session, requestedRole, name) {
+    const page = session.pages[session.activeTab];
+    const all = await this._candidates(session, null, 200);
+    const wanted = String(name == null ? "" : name).trim().toLowerCase();
+    const sameName = wanted ? all.filter(e => (e.name || "").trim().toLowerCase() === wanted) : [];
+    const sameRole = all.filter(e => e.role === requestedRole).slice(0, 20);
+
+    const result = {
+      status: "error",
+      reason: "no-match",
+      description: `role=${requestedRole} name="${name}"`,
+      currentUrl: page.url(),
+      candidates: sameRole
+    };
+
+    const mismatched = sameName.find(e => e.role !== requestedRole);
+    if (mismatched) {
+      result.matched = sameName;
+      const command = COMMAND_FOR_ROLE[mismatched.role];
+      result.hint = `"${name}" is a ${mismatched.role}, not a ${requestedRole}.`
+        + (command ? ` Use 'aux4 browser ${command}'` : " Use a command for that role")
+        + ` (or --ref ${mismatched.ref}).`;
+    } else if (sameRole.length) {
+      result.hint = `No ${requestedRole} named "${name}". Retry with --ref <n> from candidates above.`;
+    } else {
+      result.hint = `No ${requestedRole} found on the page.`;
+    }
+    return result;
+  }
+
+  // A click can navigate, and `{status:"ok"}` alone leaves the caller with no idea where it
+  // landed -- which makes it guess URLs instead of reading the page it is already on. Report the
+  // resulting page and its elements, whatever the session's snapshot mode.
+  async _afterAction(session) {
+    const page = session.pages[session.activeTab];
+    // A click that submits a form navigates, and Playwright only waits for the click itself.
+    // Without this the URL has already changed while the new document has not rendered, so the
+    // snapshot reports a page with no elements -- worse than no snapshot, because it reads as
+    // "this page is empty" rather than "ask again".
+    try {
+      await page.waitForLoadState("domcontentloaded", { timeout: 5000 });
+    } catch {
+      // best effort: a page that never fires the event still reports whatever is there now
+    }
+    const info = await this._pageInfoAsync(page, null);
+    return this._attachSnapshot(session, { status: "ok", ...info }, "auto");
+  }
+
+  // Run a locator action, converting a "nothing matched" timeout into an actionable report.
+  async _withTargetFailure(session, role, name, action) {
+    // Without a target, getByRole(role, {name: undefined}) matches the FIRST element of that
+    // role and reports success -- so a caller that passed an unsupported flag gets "ok" for an
+    // element it never asked for. Refuse instead: a wrong success is worse than an error.
+    if ((name == null || String(name).trim() === "")) {
+      return {
+        status: "error",
+        reason: "no-target",
+        description: `role=${role} with no --name and no --ref`,
+        currentUrl: session.pages[session.activeTab].url(),
+        candidates: await this._candidates(session, role),
+        hint: `Name the element to act on: --name "<accessible name>" or --ref <n> from 'aux4 browser snapshot'.`
+      };
+    }
+    try {
+      await action();
       return this._attachSnapshot(session, { status: "ok" });
     } catch (e) {
       if (e.message && e.message.includes("Timeout")) {
+        return this._targetFailure(session, role, name);
+      }
+      throw e;
+    }
+  }
+
+  // Resolve a snapshot ref to a locator. The ref is an index into the same element walk
+  // SnapshotBuilder uses, so it is resolved by re-walking the page and tagging the match --
+  // giving every command (not just click) the ref targeting the snapshot advertises.
+  async _locatorForRef(session, refValue) {
+    const page = session.pages[session.activeTab];
+    const ref = parseInt(refValue);
+    const marker = `aux4ref${ref}`;
+
+    const found = await page.evaluate(({ targetRef, attr }) => {
+      const INTERACTIVE_ROLES = [
+        "button", "link", "textbox", "checkbox", "radio", "combobox", "listbox",
+        "menuitem", "tab", "switch", "searchbox", "slider", "spinbutton", "option"
+      ];
+      const COMPONENT_ROLES = ["table", "form", "list", "navigation", "menu", "dialog", "tablist", "tree"];
+      const implicitRole = (el) => {
+        const tag = el.tagName.toLowerCase();
+        switch (tag) {
+          case "a": return el.hasAttribute("href") ? "link" : null;
+          case "button": return "button";
+          case "input": {
+            const type = (el.getAttribute("type") || "text").toLowerCase();
+            if (type === "checkbox") return "checkbox";
+            if (type === "radio") return "radio";
+            if (type === "submit" || type === "button" || type === "reset") return "button";
+            if (type === "range") return "slider";
+            if (type === "number") return "spinbutton";
+            if (type === "search") return "searchbox";
+            return "textbox";
+          }
+          case "textarea": return "textbox";
+          case "select": return "combobox";
+          case "nav": return "navigation";
+          case "table": return "table";
+          case "form": return "form";
+          case "ul": case "ol": return "list";
+          case "dialog": return "dialog";
+          case "option": return "option";
+          default: return null;
+        }
+      };
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
+      };
+      const allRoles = [...INTERACTIVE_ROLES, ...COMPONENT_ROLES];
+
+      for (const stale of document.querySelectorAll(`[${attr}]`)) stale.removeAttribute(attr);
+
+      let ref = 0;
+      for (const el of document.querySelectorAll("*")) {
+        const role = el.getAttribute("role") || implicitRole(el);
+        if (!role || !allRoles.includes(role)) continue;
+        if (!isVisible(el)) continue;
+        ref++;
+        if (ref === targetRef) {
+          el.setAttribute(attr, "");
+          return true;
+        }
+      }
+      return false;
+    }, { targetRef: ref, attr: marker });
+
+    if (!found) throw new Error(`Snapshot ref [${ref}] not found on page`);
+    return page.locator(`[${marker}]`);
+  }
+
+  async _clickWithTimeout(session, locator, timeout, description, role) {
+    try {
+      await locator.click({ timeout });
+      return this._afterAction(session);
+    } catch (e) {
+      if (e.message && e.message.includes("Timeout")) {
         const page = session.pages[session.activeTab];
+        let candidates = await this._candidates(session, role);
+        // Nothing of that role -- show every clickable element rather than an empty list.
+        if (candidates.length === 0) candidates = await this._candidates(session, null);
         return {
           clicked: false,
-          reason: "timeout",
+          reason: "no-match",
           description,
           timeout,
           currentUrl: page.url(),
-          title: await page.title().catch(() => "")
+          title: await page.title().catch(() => ""),
+          candidates,
+          hint: candidates.length
+            ? "Nothing matched. Retry with --ref <n> from candidates above."
+            : "Nothing matched and no elements found -- check the page loaded."
         };
       }
       throw e;
@@ -706,69 +925,16 @@ class SessionManager {
 
     // Click by snapshot ref index
     if (params.ref != null) {
-      const page = session.pages[session.activeTab];
-      const ref = parseInt(params.ref);
-      const clicked = await page.evaluate((targetRef) => {
-        const INTERACTIVE_ROLES = [
-          "button", "link", "textbox", "checkbox", "radio", "combobox", "listbox",
-          "menuitem", "tab", "switch", "searchbox", "slider", "spinbutton", "option"
-        ];
-        const COMPONENT_ROLES = ["table", "form", "list", "navigation", "menu", "dialog", "tablist", "tree"];
-        const implicitRole = (el) => {
-          const tag = el.tagName.toLowerCase();
-          switch (tag) {
-            case "a": return el.hasAttribute("href") ? "link" : null;
-            case "button": return "button";
-            case "input": {
-              const type = (el.getAttribute("type") || "text").toLowerCase();
-              if (type === "checkbox") return "checkbox";
-              if (type === "radio") return "radio";
-              if (type === "submit" || type === "button" || type === "reset") return "button";
-              if (type === "range") return "slider";
-              if (type === "number") return "spinbutton";
-              if (type === "search") return "searchbox";
-              return "textbox";
-            }
-            case "textarea": return "textbox";
-            case "select": return "combobox";
-            case "nav": return "navigation";
-            case "table": return "table";
-            case "form": return "form";
-            case "ul": case "ol": return "list";
-            case "dialog": return "dialog";
-            case "option": return "option";
-            default: return null;
-          }
-        };
-        const isVisible = (el) => {
-          const rect = el.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) return false;
-          const style = window.getComputedStyle(el);
-          return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
-        };
-        const allRoles = [...INTERACTIVE_ROLES, ...COMPONENT_ROLES];
-        let ref = 0;
-        for (const el of document.querySelectorAll("*")) {
-          const role = el.getAttribute("role") || implicitRole(el);
-          if (!role || !allRoles.includes(role)) continue;
-          if (!isVisible(el)) continue;
-          ref++;
-          if (ref === targetRef) {
-            el.click();
-            return true;
-          }
-        }
-        return false;
-      }, ref);
-      if (!clicked) throw new Error(`Snapshot ref [${ref}] not found on page`);
-      return this._attachSnapshot(session, { status: "ok" });
+      const locator = await this._locatorForRef(session, params.ref);
+      await locator.click({ timeout });
+      return this._afterAction(session);
     }
 
     const base = this.getBase(session, params);
     const role = params.role || "button";
     const locator = base.getByRole(role, { name: params.name });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
-    return this._clickWithTimeout(session, locator.nth(index), timeout, `role=${role} name="${params.name}"`);
+    return this._clickWithTimeout(session, locator.nth(index), timeout, `role=${role} name="${params.name}"`, role);
   }
 
   async clickSelector(sessionId, params) {
@@ -826,10 +992,102 @@ class SessionManager {
 
   async type(sessionId, params) {
     const session = this.getSession(sessionId);
+    if (params.ref != null) {
+      const locator = await this._locatorForRef(session, params.ref);
+      await locator.fill(params.value);
+      return this._attachSnapshot(session, { status: "ok" });
+    }
     const base = this.getBase(session, params);
     const role = params.role || "textbox";
-    await base.getByRole(role, { name: params.name }).fill(params.value);
-    return this._attachSnapshot(session, { status: "ok" });
+    const timeout = parseInt(params.timeout) || 5000;
+    return this._withTargetFailure(session, role, params.name, () =>
+      base.getByRole(role, { name: params.name }).fill(params.value, { timeout })
+    );
+  }
+
+  // Fill a whole form in one call. The caller names fields and values; which action each field
+  // needs -- fill, selectOption, check -- is read from the page rather than decided by the
+  // caller. Getting `type` vs `select` wrong is the single most common way a form fill fails,
+  // and this removes the choice instead of reporting it better.
+  async fill(sessionId, params) {
+    const session = this.getSession(sessionId);
+    const timeout = parseInt(params.timeout) || 5000;
+    const specs = params.field == null ? [] : (Array.isArray(params.field) ? params.field : [params.field]);
+    const all = await this._candidates(session, null, 200);
+    const results = [];
+
+    for (const spec of specs.filter(s => s !== "" && s != null)) {
+      const raw = String(spec);
+      const at = raw.indexOf("=");
+      const name = (at === -1 ? raw : raw.slice(0, at)).trim();
+      const value = at === -1 ? "" : raw.slice(at + 1);
+
+      const element = all.find(e => (e.name || "").trim().toLowerCase() === name.toLowerCase());
+      if (!element) {
+        results.push({
+          field: name,
+          status: "error",
+          reason: "not-found",
+          candidates: all.filter(e => COMMAND_FOR_ROLE[e.role]).slice(0, 20)
+        });
+        continue;
+      }
+
+      try {
+        const locator = await this._locatorForRef(session, element.ref);
+        const role = element.role;
+
+        if (role === "combobox" || role === "listbox") {
+          // A caller may name the option by its value ("br") or its visible label ("Brazil").
+          try {
+            await locator.selectOption(value, { timeout });
+          } catch {
+            await locator.selectOption({ label: value }, { timeout });
+          }
+        } else if (role === "checkbox" || role === "radio" || role === "switch") {
+          const off = ["no", "false", "off", "0", "unchecked", "uncheck"].includes(value.trim().toLowerCase());
+          if (off) {
+            await locator.uncheck({ timeout });
+          } else {
+            await locator.check({ timeout });
+          }
+        } else if (COMMAND_FOR_ROLE[role] === "type") {
+          await locator.fill(value, { timeout });
+        } else {
+          results.push({ field: name, status: "error", reason: "not-fillable", role });
+          continue;
+        }
+
+        results.push({ field: name, status: "ok", role, ref: element.ref });
+      } catch (e) {
+        results.push({ field: name, status: "error", reason: e.message.split("\n")[0], role: element.role });
+      }
+    }
+
+    // A field that cannot be filled never stops the ones that can: every field is attempted,
+    // and the failures come back named so the caller can take another route for those alone.
+    const failed = results.filter(r => r.status !== "ok");
+    const result = {
+      status: failed.length ? "partial" : "ok",
+      url: session.pages[session.activeTab].url(),
+      filled: results.length - failed.length,
+      fields: results
+    };
+    if (failed.length) {
+      result.failed = failed.map(f => f.field);
+      if (result.filled === 0) {
+        // Nothing matched at all: the likely cause is being on a different page than expected,
+        // not a mistyped name. Suggesting a --ref retry here sends the caller looking for fields
+        // that are not on this page in any form.
+        const present = all.filter(e => COMMAND_FOR_ROLE[e.role]).map(e => `"${e.name}"`).slice(0, 8);
+        result.hint = `None of these fields are on this page. You are on ${result.url}, which has: ${present.join(", ") || "no fillable fields"}. That is probably not the page you expected -- check where your last action left you before filling.`;
+      } else {
+        result.hint = `Filled ${result.filled} of ${results.length}. ${failed.map(f => `"${f.field}"`).join(", ")} did not fill and ${failed.length === 1 ? "is" : "are"} unchanged -- the elements below show the current page; retry those with --ref, or a single-field command.`;
+      }
+    }
+    // Always return the page state, whatever the session's snapshot mode: after filling a form
+    // the caller needs to see what the page looks like now, especially when something failed.
+    return this._attachSnapshot(session, result, "auto");
   }
 
   async scroll(sessionId, params) {
@@ -1072,34 +1330,42 @@ class SessionManager {
 
   async select(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session, params);
+    const timeout = parseInt(params.timeout) || 5000;
     const role = params.role || "combobox";
-    await base.getByRole(role, { name: params.name }).selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    const locator = params.ref != null
+      ? await this._locatorForRef(session, params.ref)
+      : this.getBase(session, params).getByRole(role, { name: params.name });
+    return this._withTargetFailure(session, role, params.name, () => locator.selectOption(params.value, { timeout }));
   }
 
   async check(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session, params);
+    const timeout = parseInt(params.timeout) || 5000;
     const role = params.role || "checkbox";
-    await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    const locator = params.ref != null
+      ? await this._locatorForRef(session, params.ref)
+      : this.getBase(session, params).getByRole(role, { name: params.name });
+    return this._withTargetFailure(session, role, params.name, () => locator.check({ timeout }));
   }
 
   async uncheck(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session, params);
+    const timeout = parseInt(params.timeout) || 5000;
     const role = params.role || "checkbox";
-    await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    const locator = params.ref != null
+      ? await this._locatorForRef(session, params.ref)
+      : this.getBase(session, params).getByRole(role, { name: params.name });
+    return this._withTargetFailure(session, role, params.name, () => locator.uncheck({ timeout }));
   }
 
   async hover(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session, params);
+    const timeout = parseInt(params.timeout) || 5000;
     const role = params.role || "button";
-    await base.getByRole(role, { name: params.name }).hover({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    const locator = params.ref != null
+      ? await this._locatorForRef(session, params.ref)
+      : this.getBase(session, params).getByRole(role, { name: params.name });
+    return this._withTargetFailure(session, role, params.name, () => locator.hover({ timeout }));
   }
 
   async press(sessionId, params) {
@@ -1653,6 +1919,7 @@ class DaemonServer {
       case "expect": return this.sessionManager.expect(params.session, params);
       case "expect-list": return this.sessionManager.expectList(params.session, params);
       case "get-items": return this.sessionManager.getItems(params.session, params);
+      case "fill": return this.sessionManager.fill(params.session, params);
       case "select": return this.sessionManager.select(params.session, params);
       case "check": return this.sessionManager.check(params.session, params);
       case "uncheck": return this.sessionManager.uncheck(params.session, params);
@@ -1851,9 +2118,12 @@ async function OpenCommand(params) {
     output: params.output,
     video: params.video,
     snapshot: params.snapshot,
-    waitUntil: params.waitUntil
+    waitUntil: params.waitUntil,
+    new: params.new
   });
-  if (result.snapshot) {
+  // A refusal has no sessionId -- print the whole object so the reason and the session to
+  // navigate are visible, instead of "undefined".
+  if (result.status === "error" || result.snapshot) {
     console.log(JSON.stringify(result));
   } else {
     console.log(result.sessionId);
@@ -1905,6 +2175,16 @@ async function ClickCommand(params) {
     index: params.index,
     ref: params.ref,
     within: params.within
+  });
+  console.log(JSON.stringify(result));
+}
+
+async function FillCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("fill", {
+    session: params.session,
+    field: params.field,
+    timeout: params.timeout
   });
   console.log(JSON.stringify(result));
 }
@@ -1994,7 +2274,8 @@ async function TypeCommand(params) {
       name: names[i],
       value: values[i],
       role: params.role,
-      within: params.within
+      within: params.within,
+      ref: params.ref
     });
   }
   console.log(JSON.stringify(result));
@@ -2144,7 +2425,8 @@ async function SelectCommand(params) {
     session: params.session,
     name: params.name,
     value: params.value,
-    role: params.role
+    role: params.role,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }
@@ -2154,7 +2436,8 @@ async function CheckCommand(params) {
   const result = await client.send("check", {
     session: params.session,
     name: params.name,
-    role: params.role
+    role: params.role,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }
@@ -2164,7 +2447,8 @@ async function UncheckCommand(params) {
   const result = await client.send("uncheck", {
     session: params.session,
     name: params.name,
-    role: params.role
+    role: params.role,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }
@@ -2174,7 +2458,8 @@ async function HoverCommand(params) {
   const result = await client.send("hover", {
     session: params.session,
     name: params.name,
-    role: params.role
+    role: params.role,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }
@@ -2293,7 +2578,7 @@ const values = args.slice(1);
 const commands = {
   start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil", "new"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
   visit:       { handler: VisitCommand,    args: ["session", "url", "waitUntil"] },
@@ -2305,7 +2590,7 @@ const commands = {
   mouse:       { handler: MouseCommand,    args: ["session", "action", "x", "y", "steps", "selector", "within"] },
   "click-text": { handler: ClickTextCommand, args: ["session", "text", "index", "within"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
-  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "within"] },
+  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "within", "ref"] },
   scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount", "to"] },
   content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output"] },
   screenshot:  { handler: ScreenshotCommand, args: ["session", "output", "fullPage"] },
@@ -2318,10 +2603,11 @@ const commands = {
   cookies:     { handler: CookiesCommand,  args: ["session", "export", "import"] },
   download:    { handler: DownloadCommand, args: ["session", "url", "output"] },
   "save-pdf":  { handler: SavePdfCommand,  args: ["session", "output", "format", "printBackground"] },
-  select:      { handler: SelectCommand,   args: ["session", "name", "value", "role"] },
-  check:       { handler: CheckCommand,    args: ["session", "name", "role"] },
-  uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role"] },
-  hover:       { handler: HoverCommand,    args: ["session", "name", "role"] },
+  fill:        { handler: FillCommand,     args: ["session", "field", "timeout"] },
+  select:      { handler: SelectCommand,   args: ["session", "name", "value", "role", "ref"] },
+  check:       { handler: CheckCommand,    args: ["session", "name", "role", "ref"] },
+  uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role", "ref"] },
+  hover:       { handler: HoverCommand,    args: ["session", "name", "role", "ref"] },
   press:       { handler: PressCommand,    args: ["session", "key", "selector"] },
   clear:       { handler: ClearCommand,    args: ["session", "name", "role"] },
   upload:      { handler: UploadCommand,   args: ["session", "name", "file"] },

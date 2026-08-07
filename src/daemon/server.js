@@ -123,6 +123,7 @@ export class DaemonServer {
       case "expect": return this.sessionManager.expect(params.session, params);
       case "expect-list": return this.sessionManager.expectList(params.session, params);
       case "get-items": return this.sessionManager.getItems(params.session, params);
+      case "fill": return this.sessionManager.fill(params.session, params);
       case "select": return this.sessionManager.select(params.session, params);
       case "check": return this.sessionManager.check(params.session, params);
       case "uncheck": return this.sessionManager.uncheck(params.session, params);

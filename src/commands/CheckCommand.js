@@ -5,7 +5,8 @@ export async function CheckCommand(params) {
   const result = await client.send("check", {
     session: params.session,
     name: params.name,
-    role: params.role
+    role: params.role,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }
@@ -15,7 +16,8 @@ export async function UncheckCommand(params) {
   const result = await client.send("uncheck", {
     session: params.session,
     name: params.name,
-    role: params.role
+    role: params.role,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }

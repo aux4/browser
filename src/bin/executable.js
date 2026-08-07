@@ -8,6 +8,7 @@ import { BackCommand } from "../commands/BackCommand.js";
 import { ForwardCommand } from "../commands/ForwardCommand.js";
 import { ReloadCommand } from "../commands/ReloadCommand.js";
 import { ClickCommand } from "../commands/ClickCommand.js";
+import { FillCommand } from "../commands/FillCommand.js";
 import { ClickSelectorCommand } from "../commands/ClickSelectorCommand.js";
 import { MouseCommand } from "../commands/MouseCommand.js";
 import { ClickTextCommand } from "../commands/ClickTextCommand.js";
@@ -44,7 +45,7 @@ const values = args.slice(1);
 const commands = {
   start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil", "new"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
   visit:       { handler: VisitCommand,    args: ["session", "url", "waitUntil"] },
@@ -56,7 +57,7 @@ const commands = {
   mouse:       { handler: MouseCommand,    args: ["session", "action", "x", "y", "steps", "selector", "within"] },
   "click-text": { handler: ClickTextCommand, args: ["session", "text", "index", "within"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
-  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "within"] },
+  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "within", "ref"] },
   scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount", "to"] },
   content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output"] },
   screenshot:  { handler: ScreenshotCommand, args: ["session", "output", "fullPage"] },
@@ -69,10 +70,11 @@ const commands = {
   cookies:     { handler: CookiesCommand,  args: ["session", "export", "import"] },
   download:    { handler: DownloadCommand, args: ["session", "url", "output"] },
   "save-pdf":  { handler: SavePdfCommand,  args: ["session", "output", "format", "printBackground"] },
-  select:      { handler: SelectCommand,   args: ["session", "name", "value", "role"] },
-  check:       { handler: CheckCommand,    args: ["session", "name", "role"] },
-  uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role"] },
-  hover:       { handler: HoverCommand,    args: ["session", "name", "role"] },
+  fill:        { handler: FillCommand,     args: ["session", "field", "timeout"] },
+  select:      { handler: SelectCommand,   args: ["session", "name", "value", "role", "ref"] },
+  check:       { handler: CheckCommand,    args: ["session", "name", "role", "ref"] },
+  uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role", "ref"] },
+  hover:       { handler: HoverCommand,    args: ["session", "name", "role", "ref"] },
   press:       { handler: PressCommand,    args: ["session", "key", "selector"] },
   clear:       { handler: ClearCommand,    args: ["session", "name", "role"] },
   upload:      { handler: UploadCommand,   args: ["session", "name", "file"] },

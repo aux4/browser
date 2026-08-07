@@ -10,9 +10,12 @@ export async function OpenCommand(params) {
     output: params.output,
     video: params.video,
     snapshot: params.snapshot,
-    waitUntil: params.waitUntil
+    waitUntil: params.waitUntil,
+    new: params.new
   });
-  if (result.snapshot) {
+  // A refusal has no sessionId -- print the whole object so the reason and the session to
+  // navigate are visible, instead of "undefined".
+  if (result.status === "error" || result.snapshot) {
     console.log(JSON.stringify(result));
   } else {
     console.log(result.sessionId);
