@@ -39,7 +39,7 @@ aux4 browser close --session $SESSION >/dev/null 2>&1
 ok
 ```
 
-### should return structured timeout on click failure
+### should return a structured failure when the click matches nothing
 
 ```timeout
 30000
@@ -67,6 +67,6 @@ aux4 browser close --session $SESSION >/dev/null 2>&1
 
 ```expect
 clicked:false
-reason:timeout
+reason:no-match
 hasDescription:true
 ```

@@ -90,7 +90,8 @@ export class SnapshotBuilder {
           const ref = document.getElementById(labelledBy);
           if (ref) return (ref.textContent || "").trim().slice(0, 120);
         }
-        if (el.tagName.toLowerCase() === "input" || el.tagName.toLowerCase() === "textarea") {
+        const tag = el.tagName.toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select") {
           if (el.id) {
             const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
             if (label) return (label.textContent || "").trim().slice(0, 120);
@@ -99,6 +100,12 @@ export class SnapshotBuilder {
           if (parentLabel) return (parentLabel.textContent || "").trim().slice(0, 120);
           const placeholder = el.getAttribute("placeholder");
           if (placeholder) return placeholder.trim();
+          const controlTitle = el.getAttribute("title");
+          if (controlTitle) return controlTitle.trim();
+          // A form control's textContent is not its accessible name -- for <select> it is the
+          // concatenated option text, which no locator can match. Report nothing rather than a
+          // name that looks usable and is not.
+          return "";
         }
         const title = el.getAttribute("title");
         if (title) return title.trim();

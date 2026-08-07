@@ -5,7 +5,8 @@ export async function HoverCommand(params) {
   const result = await client.send("hover", {
     session: params.session,
     name: params.name,
-    role: params.role
+    role: params.role,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }

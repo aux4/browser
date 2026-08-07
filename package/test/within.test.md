@@ -72,6 +72,6 @@ aux4 browser close --session $SESSION >/dev/null 2>&1
 ```
 
 ```expect
-timeout
+no-match
 idle
 ```

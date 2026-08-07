@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.21",
+  "version": "1.0.30",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -88,7 +88,7 @@
         {
           "name": "open",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil)"
+            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil,new)"
           ],
           "help": {
             "text": "Open a new browser session",
@@ -132,6 +132,11 @@
                 "name": "waitUntil",
                 "text": "Navigation wait strategy: domcontentloaded, load, networkidle, settle",
                 "default": "load"
+              },
+              {
+                "name": "new",
+                "text": "Open a separate session even if one is already open on this host. Without it, opening a second session on a host you already have open is refused, because it would discard that session's cookies.",
+                "default": ""
               }
             ]
           }
@@ -382,7 +387,7 @@
         {
           "name": "type",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,within)"
+            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,within,ref)"
           ],
           "help": {
             "text": "Type text into an input field",
@@ -394,9 +399,9 @@
               },
               {
                 "name": "name",
-                "text": "Accessible name of the field",
-                "required": true,
-                "multiple": true
+                "text": "Accessible name of the field (omit when using --ref)",
+                "multiple": true,
+                "default": ""
               },
               {
                 "name": "value",
@@ -412,6 +417,11 @@
               {
                 "name": "within",
                 "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
+                "default": ""
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot), overrides name/role",
                 "default": ""
               }
             ]
@@ -449,9 +459,36 @@
           }
         },
         {
+          "name": "fill",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs fill values(session,field*,timeout)"
+          ],
+          "help": {
+            "text": "Fill a whole form in one call: text fields, dropdowns and checkboxes together",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "field",
+                "text": "A field as name=value, repeatable. The page decides how each one is filled -- a dropdown is selected, a checkbox is ticked, a text box is typed into. For a dropdown the value may be the option label or its value; for a checkbox use yes/no.",
+                "required": true,
+                "multiple": true
+              },
+              {
+                "name": "timeout",
+                "text": "Per-field timeout in milliseconds",
+                "default": "5000"
+              }
+            ]
+          }
+        },
+        {
           "name": "select",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs select values(session,name,value,role)"
+            "node ${packageDir}/lib/aux4-browser.mjs select values(session,name,value,role,ref)"
           ],
           "help": {
             "text": "Select an option from a dropdown",
@@ -463,8 +500,8 @@
               },
               {
                 "name": "name",
-                "text": "Accessible name of the select element",
-                "required": true
+                "text": "Accessible name of the select element (omit when using --ref)",
+                "default": ""
               },
               {
                 "name": "value",
@@ -475,6 +512,11 @@
                 "name": "role",
                 "text": "ARIA role",
                 "default": "combobox"
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot), overrides name/role",
+                "default": ""
               }
             ]
           }
@@ -482,7 +524,7 @@
         {
           "name": "check",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs check values(session,name,role)"
+            "node ${packageDir}/lib/aux4-browser.mjs check values(session,name,role,ref)"
           ],
           "help": {
             "text": "Check a checkbox",
@@ -494,13 +536,18 @@
               },
               {
                 "name": "name",
-                "text": "Accessible name of the checkbox",
-                "required": true
+                "text": "Accessible name of the checkbox (omit when using --ref)",
+                "default": ""
               },
               {
                 "name": "role",
                 "text": "ARIA role",
                 "default": "checkbox"
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot), overrides name/role",
+                "default": ""
               }
             ]
           }
@@ -508,7 +555,7 @@
         {
           "name": "uncheck",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs uncheck values(session,name,role)"
+            "node ${packageDir}/lib/aux4-browser.mjs uncheck values(session,name,role,ref)"
           ],
           "help": {
             "text": "Uncheck a checkbox",
@@ -520,13 +567,18 @@
               },
               {
                 "name": "name",
-                "text": "Accessible name of the checkbox",
-                "required": true
+                "text": "Accessible name of the checkbox (omit when using --ref)",
+                "default": ""
               },
               {
                 "name": "role",
                 "text": "ARIA role",
                 "default": "checkbox"
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot), overrides name/role",
+                "default": ""
               }
             ]
           }
@@ -534,7 +586,7 @@
         {
           "name": "hover",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs hover values(session,name,role)"
+            "node ${packageDir}/lib/aux4-browser.mjs hover values(session,name,role,ref)"
           ],
           "help": {
             "text": "Hover over an element",
@@ -546,13 +598,18 @@
               },
               {
                 "name": "name",
-                "text": "Accessible name of the element",
-                "required": true
+                "text": "Accessible name of the element (omit when using --ref)",
+                "default": ""
               },
               {
                 "name": "role",
                 "text": "ARIA role",
                 "default": "button"
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot), overrides name/role",
+                "default": ""
               }
             ]
           }

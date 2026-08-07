@@ -72,6 +72,16 @@ Pages load using the `domcontentloaded` strategy, which considers navigation com
 ### Interaction
 
 ```bash
+# Fill a whole form in one call -- the page decides how each field is filled
+# (text box typed into, dropdown selected, checkbox ticked)
+aux4 browser fill --session <id> \
+  --field "Full name=Sally Reed" \
+  --field "Role=engineer" \
+  --field "Country=Brazil" \
+  --field "Subscribe to the newsletter=yes"
+# then submit
+aux4 browser click --session <id> --name "Save profile"
+
 # Click a button (default role: button)
 aux4 browser click --session <id> --name "Submit"
 

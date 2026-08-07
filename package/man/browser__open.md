@@ -35,3 +35,19 @@ aux4 browser open --url https://example.com --snapshot auto
 # Session with video recording
 aux4 browser open --url https://example.com --output ./artifacts --video retain-on-failure
 ```
+
+## Opening a second session
+
+`open` always creates a **new** session with its own cookie jar. Opening again for a host you
+already have a session on is refused, because it would silently discard that session — you would
+be signed out without being told:
+
+```
+Session 1a2b is already open on site (currently http://site/a).
+To go to another page in it: aux4 browser visit --session 1a2b --url http://site/b
+If you really need a separate session, pass --new.
+```
+
+To move an existing session to another page use `aux4 browser visit --session <id> --url <url>`.
+Pass `--new` only when you genuinely want a second, independent session on the same host. A
+different host never collides.
