@@ -480,7 +480,20 @@ export class SessionManager {
       return false;
     }, { targetRef: ref, attr: marker });
 
-    if (!found) throw new Error(`Snapshot ref [${ref}] not found on page`);
+    if (!found) {
+      // A ref indexes ONE snapshot. The common cause of a miss is acting on a ref taken before
+      // navigating -- the page changed underneath it. "not found" reads as "that element is
+      // gone"; say the page moved and show what is here now, with the refs that are valid.
+      const here = await this._candidates(session, null);
+      const err = new Error(
+        `Snapshot ref [${ref}] is not on this page. Refs come from one snapshot, and this page `
+        + `(${page.url()}) has ${here.length} element(s) -- the page changed since that snapshot. `
+        + `Take a fresh snapshot, then use a ref from it. Currently here: `
+        + (here.length ? here.map(e => `[${e.ref}] ${e.role} "${e.name}"`).join(", ") : "nothing interactive")
+      );
+      err.staleRef = true;
+      throw err;
+    }
     return page.locator(`[${marker}]`);
   }
 
@@ -665,6 +678,19 @@ export class SessionManager {
       filled: results.length - failed.length,
       fields: results
     };
+    // A filled form that is never submitted is a silent no-op: the values sit in the DOM, the
+    // caller reads "ok", and nothing was saved. Name the submit control so the next step is
+    // obvious rather than assumed.
+    if (!failed.length && results.length) {
+      const buttons = (await this._candidates(session, "button")).filter(b => b.name);
+      if (buttons.length) {
+        const submit = buttons.find(b => /save|submit|sign|continue|next|create|send/i.test(b.name)) || buttons[0];
+        result.submitWith = `aux4 browser click --session <id> --ref ${submit.ref}`;
+        result.hint = `Filled ${results.length} field(s). Nothing is saved until the form is submitted: `
+          + `click "${submit.name}" (--ref ${submit.ref}), then check the page changed.`;
+      }
+    }
+
     if (failed.length) {
       result.failed = failed.map(f => f.field);
       if (result.filled === 0) {
