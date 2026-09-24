@@ -6,9 +6,7 @@ import fs from "node:fs";
 import { DaemonServer } from "../daemon/server.js";
 import { ensureBrowserInstalled } from "../daemon/BrowserInstaller.js";
 
-const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
-const SOCKET_PATH = path.join(SOCKET_DIR, "browser.sock");
-const PID_PATH = path.join(SOCKET_DIR, "browser.pid");
+import { SOCKET_PATH, PID_PATH } from "../lib/Paths.js";
 
 function isDaemonRunning() {
   try {
@@ -47,7 +45,8 @@ export async function StartCommand(params) {
       persistent: params.persistent === "true" || params.persistent === true,
       channel: params.channel || "",
       browser: params.browser || "",
-      headed: params.headed === "true" || params.headed === true
+      headed: params.headed === "true" || params.headed === true,
+      localBrowser: !(params.localBrowser === "false" || params.localBrowser === false)
     });
     await server.start();
     return;
@@ -62,7 +61,11 @@ export async function StartCommand(params) {
   // Self-provision the browser binary in the foreground (before forking the
   // detached daemon) so the "installing…" notice is visible to the user and the
   // daemon child never blocks on a download while waitForSocket() is ticking.
-  ensureBrowserInstalled(params.browser || "chromium");
+  // Skipped with --localBrowser false (remote-only daemon: the local browser
+  // is then provisioned lazily, on the first local session, if ever).
+  if (!(params.localBrowser === "false" || params.localBrowser === false)) {
+    ensureBrowserInstalled(params.browser || "chromium");
+  }
 
   // Fork the daemon to the background
   const child = spawn(process.execPath, process.argv.slice(1), {

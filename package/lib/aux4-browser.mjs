@@ -488,7 +488,34 @@ const ProviderBridge = {
   close: (provider, params) => runProviderCommand(provider, "close", params)
 };
 
-const ARTIFACTS_DIR = path.join(os.homedir(), ".aux4.config", "browser", "artifacts");
+// Where the daemon keeps its socket, pid file and artifacts.
+//
+// Default: ~/.aux4.config/browser. Override with AUX4_BROWSER_DIR. When the
+// home directory is not writable (e.g. a read-only serverless/container
+// filesystem where only the temp dir is writable), fall back to
+// <tmpdir>/aux4-browser so the daemon can still create its unix socket.
+
+function isWritableDir(dir) {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.accessSync(dir, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveBrowserDir() {
+  if (process.env.AUX4_BROWSER_DIR) return process.env.AUX4_BROWSER_DIR;
+  const homeDir = path.join(os.homedir(), ".aux4.config", "browser");
+  if (isWritableDir(homeDir)) return homeDir;
+  return path.join(os.tmpdir(), "aux4-browser");
+}
+
+const BROWSER_DIR = resolveBrowserDir();
+const SOCKET_PATH = path.join(BROWSER_DIR, "browser.sock");
+const PID_PATH = path.join(BROWSER_DIR, "browser.pid");
+const ARTIFACTS_DIR = path.join(BROWSER_DIR, "artifacts");
 
 // Provider-backed session ids are "<provider>:<opaque token>" (e.g.
 // "agentcore:eyJ...") so a session opened with --provider agentcore is
@@ -500,6 +527,34 @@ function encodeSessionId(provider, token) {
   return `${provider}:${token}`;
 }
 
+// Built-in provider "cdp": attach to ANY remote Chromium over a CDP WebSocket
+// URL the caller already holds (e.g. a short-lived presigned URL minted by a
+// control plane that owns the remote session). No plugin, no vendor code, no
+// credentials in this process: the token IS the base64url-encoded wsUrl, so the
+// session id "cdp:<base64url(wsUrl)>" is self-contained and any fresh
+// process/daemon can reattach with nothing but the id. Closing a cdp session
+// only disconnects — the remote session's lifecycle belongs to whoever minted
+// the URL.
+const CDP_PROVIDER = "cdp";
+
+function encodeCdpToken(wsUrl) {
+  return Buffer.from(String(wsUrl), "utf-8").toString("base64url");
+}
+
+function decodeCdpToken(token) {
+  const wsUrl = Buffer.from(String(token), "base64url").toString("utf-8");
+  if (!/^wss?:\/\//.test(wsUrl)) throw new Error("browser provider \"cdp\": session token is not a ws:// or wss:// URL");
+  return wsUrl;
+}
+
+async function disconnectQuietly(providerBrowser) {
+  // For a connectOverCDP Browser, close() only drops our WebSocket (Playwright
+  // closes the transport; it does not send Browser.close and does not close
+  // the remote default context), so the remote session survives.
+  if (!providerBrowser) return;
+  try { await providerBrowser.close(); } catch {}
+}
+
 function decodeSessionId(id) {
   const idx = typeof id === "string" ? id.indexOf(":") : -1;
   if (idx === -1) return null;
@@ -507,12 +562,16 @@ function decodeSessionId(id) {
 }
 
 class SessionManager {
-  constructor(browser, options = {}) {
+  constructor(getLocalBrowser, options = {}) {
     // The daemon's own local browser, used for provider="local" sessions
     // (the default). Provider-backed sessions (e.g. --provider agentcore)
     // each carry their OWN connection (session.providerBrowser) obtained via
     // the provider seam — see open()/resolveSession() and ProviderBridge.js.
-    this.browser = browser;
+    // Accepts either a Browser or an async getter (lazy launch, see
+    // DaemonServer.ensureLocalBrowser).
+    this.getLocalBrowser = typeof getLocalBrowser === "function"
+      ? getLocalBrowser
+      : async () => getLocalBrowser;
     this.sessions = new Map();
     this.maxSessions = options.maxSessions || 20;
     this.onEmpty = options.onEmpty || (() => {});
@@ -563,8 +622,15 @@ class SessionManager {
     if (!decoded) throw new Error(`Session not found: ${sessionId}`);
 
     const { provider, token } = decoded;
-    const { wsUrl, headers } = await ProviderBridge.attach(provider, { token });
-    if (!wsUrl) throw new Error(`browser provider "${provider}" attach did not return a wsUrl`);
+    let wsUrl;
+    let headers;
+    if (provider === CDP_PROVIDER) {
+      wsUrl = decodeCdpToken(token);
+      headers = {};
+    } else {
+      ({ wsUrl, headers } = await ProviderBridge.attach(provider, { token }));
+      if (!wsUrl) throw new Error(`browser provider "${provider}" attach did not return a wsUrl`);
+    }
 
     const providerBrowser = await BrowserEngine.connect(wsUrl, headers || {});
     const context = providerBrowser.contexts()[0] || await providerBrowser.newContext();
@@ -699,11 +765,18 @@ class SessionManager {
       // Provider seam: core knows nothing about the provider beyond
       // "give me a wsUrl+headers to connectOverCDP, and an opaque token I can
       // hand back to reattach/close later." See ProviderBridge.js.
-      const opened = await ProviderBridge.open(provider, {
-        awsProfile: params.awsProfile,
-        awsRegion: params.awsRegion,
-        timeout: params.timeout
-      });
+      let opened;
+      if (provider === CDP_PROVIDER) {
+        if (!params.cdpUrl) throw new Error(`browser provider "cdp" requires --cdpUrl <ws(s)://...>`);
+        opened = { token: encodeCdpToken(params.cdpUrl), wsUrl: params.cdpUrl, headers: {} };
+        decodeCdpToken(opened.token);
+      } else {
+        opened = await ProviderBridge.open(provider, {
+          awsProfile: params.awsProfile,
+          awsRegion: params.awsRegion,
+          timeout: params.timeout
+        });
+      }
       if (!opened.token || !opened.wsUrl) {
         throw new Error(`browser provider "${provider}" open did not return a token/wsUrl`);
       }
@@ -730,7 +803,8 @@ class SessionManager {
         fs.mkdirSync(videoDir, { recursive: true });
         contextOptions.recordVideo = { dir: videoDir };
       }
-      context = await this.browser.newContext(contextOptions);
+      const localBrowser = await this.getLocalBrowser();
+      context = await localBrowser.newContext(contextOptions);
       page = await context.newPage();
       id = crypto.randomUUID().slice(0, 8);
     }
@@ -801,12 +875,14 @@ class SessionManager {
     clearTimeout(session.timer);
 
     if (session.remote) {
-      if (!detach) {
+      const stopRemote = !detach && session.provider !== CDP_PROVIDER;
+      if (stopRemote) {
         await ProviderBridge.close(session.provider, { token: session.providerToken });
       }
+      await disconnectQuietly(session.providerBrowser);
       this.sessions.delete(sessionId);
       if (this.sessions.size === 0) this.onEmpty();
-      return { status: detach ? "detached" : "closed" };
+      return { status: stopRemote ? "closed" : "detached" };
     }
 
     // Collect video paths before closing context
@@ -1809,10 +1885,6 @@ function defaultLog(message) {
   process.stderr.write(message + "\n");
 }
 
-const SOCKET_DIR$1 = path.join(os.homedir(), ".aux4.config", "browser");
-const SOCKET_PATH$2 = path.join(SOCKET_DIR$1, "browser.sock");
-const PID_PATH$1 = path.join(SOCKET_DIR$1, "browser.pid");
-
 class DaemonServer {
   constructor(options = {}) {
     this.maxSessions = options.maxSessions || 20;
@@ -1820,32 +1892,38 @@ class DaemonServer {
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
     this.headed = options.headed || false;
+    // false = don't provision/launch the local browser at daemon start; it is
+    // launched lazily on the first LOCAL session instead. Remote sessions
+    // (--provider cdp / agentcore / ...) never need it, which is what lets
+    // the daemon run where no local browser exists (e.g. a serverless VM
+    // that only attaches to a remote browser over CDP).
+    this.localBrowser = options.localBrowser !== false;
+    this.localBrowserPromise = null;
     this.sessionManager = null;
     this.server = null;
     this.browser = null;
   }
 
   async start() {
-    fs.mkdirSync(SOCKET_DIR$1, { recursive: true });
-    if (fs.existsSync(SOCKET_PATH$2)) fs.unlinkSync(SOCKET_PATH$2);
+    fs.mkdirSync(BROWSER_DIR, { recursive: true });
+    if (fs.existsSync(SOCKET_PATH)) fs.unlinkSync(SOCKET_PATH);
 
-    // The daemon always launches a LOCAL browser for provider="local"
-    // sessions (the default, and the only kind before CBR-008). Any
-    // provider-backed session (--provider agentcore, ...) gets its own
-    // separate connection via the provider seam in SessionManager.open()/
+    // The daemon's LOCAL browser serves provider="local" sessions (the
+    // default). Any provider-backed session (--provider cdp / agentcore, ...)
+    // gets its own separate connection via SessionManager.open()/
     // resolveSession() — the daemon itself is never "attached" as a whole.
-    ensureBrowserInstalled(this.browserName || "chromium");
+    // With localBrowser=false the local browser is launched lazily, only when
+    // the first local session is opened.
+    if (this.localBrowser) await this.ensureLocalBrowser();
 
-    const launchOptions = {};
-    if (this.channel) launchOptions.channel = this.channel;
-    if (this.browserName) launchOptions.browser = this.browserName;
-    if (this.headed) launchOptions.headed = true;
-    this.browser = await BrowserEngine.launch(launchOptions);
-
-    this.sessionManager = new SessionManager(this.browser, {
+    this.sessionManager = new SessionManager(() => this.ensureLocalBrowser(), {
       maxSessions: this.maxSessions,
       onEmpty: () => {
-        if (!this.persistent) this.stop();
+        // Deferred so the reply to the request that emptied the daemon (e.g.
+        // `close`) is written before the process exits.
+        if (!this.persistent) setTimeout(() => {
+          if (this.sessionManager.sessions.size === 0) this.stop();
+        }, 100);
       }
     });
 
@@ -1862,13 +1940,13 @@ class DaemonServer {
       socket.on("error", () => {});
     });
 
-    this.server.listen(SOCKET_PATH$2);
-    fs.writeFileSync(PID_PATH$1, process.pid.toString());
+    this.server.listen(SOCKET_PATH);
+    fs.writeFileSync(PID_PATH, process.pid.toString());
 
     process.on("SIGTERM", () => this.stop());
     process.on("SIGINT", () => this.stop());
 
-    console.log(JSON.stringify({ status: "started", socket: SOCKET_PATH$2, pid: process.pid }));
+    console.log(JSON.stringify({ status: "started", socket: SOCKET_PATH, pid: process.pid }));
   }
 
   async handleLine(socket, line) {
@@ -1895,6 +1973,22 @@ class DaemonServer {
       if (screenshot) error.screenshot = screenshot;
       socket.write(JSON.stringify({ error, id: request.id }) + "\n");
     }
+  }
+
+  ensureLocalBrowser() {
+    if (!this.localBrowserPromise) {
+      this.localBrowserPromise = (async () => {
+        ensureBrowserInstalled(this.browserName || "chromium");
+        const launchOptions = {};
+        if (this.channel) launchOptions.channel = this.channel;
+        if (this.browserName) launchOptions.browser = this.browserName;
+        if (this.headed) launchOptions.headed = true;
+        this.browser = await BrowserEngine.launch(launchOptions);
+        return this.browser;
+      })();
+      this.localBrowserPromise.catch(() => { this.localBrowserPromise = null; });
+    }
+    return this.localBrowserPromise;
   }
 
   truncateError(message) {
@@ -1970,15 +2064,11 @@ class DaemonServer {
     // start()) — always safe/correct to close it on shutdown.
     if (this.browser) await this.browser.close();
     if (this.server) this.server.close();
-    try { fs.unlinkSync(SOCKET_PATH$2); } catch {}
-    try { fs.unlinkSync(PID_PATH$1); } catch {}
+    try { fs.unlinkSync(SOCKET_PATH); } catch {}
+    try { fs.unlinkSync(PID_PATH); } catch {}
     if (!this.embedded) process.exit(0);
   }
 }
-
-const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
-const SOCKET_PATH$1 = path.join(SOCKET_DIR, "browser.sock");
-const PID_PATH = path.join(SOCKET_DIR, "browser.pid");
 
 function isDaemonRunning() {
   try {
@@ -1995,7 +2085,7 @@ function waitForSocket(maxAttempts = 30) {
     let attempts = 0;
     const tryConnect = () => {
       attempts++;
-      const socket = net.createConnection(SOCKET_PATH$1);
+      const socket = net.createConnection(SOCKET_PATH);
       socket.on("connect", () => { socket.end(); resolve(); });
       socket.on("error", () => {
         if (attempts >= maxAttempts) {
@@ -2017,7 +2107,8 @@ async function StartCommand(params) {
       persistent: params.persistent === "true" || params.persistent === true,
       channel: params.channel || "",
       browser: params.browser || "",
-      headed: params.headed === "true" || params.headed === true
+      headed: params.headed === "true" || params.headed === true,
+      localBrowser: !(params.localBrowser === "false" || params.localBrowser === false)
     });
     await server.start();
     return;
@@ -2032,7 +2123,11 @@ async function StartCommand(params) {
   // Self-provision the browser binary in the foreground (before forking the
   // detached daemon) so the "installing…" notice is visible to the user and the
   // daemon child never blocks on a download while waitForSocket() is ticking.
-  ensureBrowserInstalled(params.browser || "chromium");
+  // Skipped with --localBrowser false (remote-only daemon: the local browser
+  // is then provisioned lazily, on the first local session, if ever).
+  if (!(params.localBrowser === "false" || params.localBrowser === false)) {
+    ensureBrowserInstalled(params.browser || "chromium");
+  }
 
   // Fork the daemon to the background
   const child = spawn(process.execPath, process.argv.slice(1), {
@@ -2048,15 +2143,13 @@ async function StartCommand(params) {
   console.log(JSON.stringify({ status: "started", pid: child.pid }));
 }
 
-const SOCKET_PATH = path.join(os.homedir(), ".aux4.config", "browser", "browser.sock");
-
 class DaemonClient {
   async send(method, params = {}) {
     try {
       return await this._connect(method, params);
     } catch (e) {
       if (e.code === "ENOENT" || e.code === "ECONNREFUSED" || e.message?.includes("not running")) {
-        await this._autoStart();
+        await this._autoStart(this._needsLocalBrowser(method, params));
         return await this._connect(method, params);
       }
       throw e;
@@ -2093,8 +2186,20 @@ class DaemonClient {
     });
   }
 
-  async _autoStart() {
-    const child = spawn("aux4", ["browser", "start"], {
+  // A request on a provider-backed session ("<provider>:<token>") or an
+  // `open --provider <remote>` never needs the local browser, so the
+  // auto-started daemon skips provisioning/launching it (it is still
+  // launched lazily if a local session is opened later).
+  _needsLocalBrowser(method, params = {}) {
+    if (method === "open") return !params.provider || params.provider === "local";
+    if (typeof params.session === "string" && params.session.includes(":")) return false;
+    return true;
+  }
+
+  async _autoStart(needsLocalBrowser = true) {
+    const args = ["browser", "start"];
+    if (!needsLocalBrowser) args.push("--localBrowser", "false");
+    const child = spawn("aux4", args, {
       detached: true,
       stdio: "ignore",
     });
@@ -2139,7 +2244,8 @@ async function OpenCommand(params) {
     waitUntil: params.waitUntil,
     provider: params.provider,
     awsProfile: params.awsProfile,
-    awsRegion: params.awsRegion
+    awsRegion: params.awsRegion,
+    cdpUrl: params.cdpUrl
   });
   if (result.snapshot) {
     console.log(JSON.stringify(result));
@@ -2583,9 +2689,9 @@ const action = args[0];
 const values = args.slice(1);
 
 const commands = {
-  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed"] },
+  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed", "localBrowser"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil", "provider", "awsProfile", "awsRegion"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil", "provider", "awsProfile", "awsRegion", "cdpUrl"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
   visit:       { handler: VisitCommand,    args: ["session", "url", "waitUntil"] },

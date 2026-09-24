@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.22-local-local",
+  "version": "1.0.23",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -9,6 +9,11 @@
     "aux4/playbook"
   ],
   "system": [
+    [
+      "test:node --version",
+      "brew:node",
+      "linux:nodejs"
+    ],
     [
       "test:chromium --version",
       "linux:chromium",
@@ -43,7 +48,7 @@
         {
           "name": "start",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs start values(maxSessions,persistent,channel,browser,headed)"
+            "node ${packageDir}/lib/aux4-browser.mjs start values(maxSessions,persistent,channel,browser,headed,localBrowser)"
           ],
           "help": {
             "text": "Start the browser daemon",
@@ -72,6 +77,11 @@
                 "name": "headed",
                 "text": "Run a visible (headed) browser window instead of headless — strongly reduces bot detection",
                 "default": "false"
+              },
+              {
+                "name": "localBrowser",
+                "text": "Provision and launch the local browser at start; false = only when the first local session opens (remote-only daemons, e.g. a serverless VM using --provider cdp)",
+                "default": "true"
               }
             ]
           }
@@ -88,7 +98,7 @@
         {
           "name": "open",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil,provider,awsProfile,awsRegion)"
+            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil,provider,awsProfile,awsRegion,cdpUrl)"
           ],
           "help": {
             "text": "Open a new browser session",
@@ -135,7 +145,7 @@
               },
               {
                 "name": "provider",
-                "text": "Where to run the browser: local (default) or a provider name from an installed plugin (e.g. agentcore)",
+                "text": "Where to run the browser: local (default), cdp (attach to --cdpUrl; built in), or a provider name from an installed plugin (e.g. agentcore)",
                 "default": "local"
               },
               {
@@ -146,6 +156,11 @@
               {
                 "name": "awsRegion",
                 "text": "AWS region to use when --provider requires an AWS region (e.g. agentcore)",
+                "default": ""
+              },
+              {
+                "name": "cdpUrl",
+                "text": "CDP WebSocket URL (ws:// or wss://, e.g. a presigned URL from `browser presign`) to attach to when --provider cdp",
                 "default": ""
               }
             ]
@@ -163,6 +178,49 @@
                 "name": "session",
                 "text": "Session ID",
                 "required": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "presign",
+          "execute": [
+            "if(provider==local) && echo 'browser presign: --provider must be a remote provider plugin (e.g. agentcore)' >&2 && exit 1 || true",
+            "if(provider==cdp) && echo 'browser presign: --provider cdp already takes a URL; presign the provider that owns the session (e.g. agentcore)' >&2 && exit 1 || true",
+            "aux4 browser ${provider}-presign param(session) param(timeout) param(expires) param(awsProfile) param(awsRegion)"
+          ],
+          "help": {
+            "text": "Mint a short-lived CDP URL for a provider session (starting one if --session is empty) that a credential-less process can attach to with --provider cdp",
+            "variables": [
+              {
+                "name": "provider",
+                "text": "Provider plugin that owns the remote session (e.g. agentcore)",
+                "default": "agentcore"
+              },
+              {
+                "name": "session",
+                "text": "Existing provider session id (e.g. agentcore:...) to re-presign; empty = start a new remote session",
+                "default": ""
+              },
+              {
+                "name": "timeout",
+                "text": "Lifetime of a NEW remote session (e.g. 15m, 900s); ignored with --session",
+                "default": ""
+              },
+              {
+                "name": "expires",
+                "text": "Presigned URL validity in seconds (provider maximum applies, AgentCore: 300)",
+                "default": "300"
+              },
+              {
+                "name": "awsProfile",
+                "text": "AWS profile when the provider needs AWS credentials (e.g. agentcore)",
+                "default": ""
+              },
+              {
+                "name": "awsRegion",
+                "text": "AWS region when the provider needs one (e.g. agentcore)",
+                "default": ""
               }
             ]
           }

@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import { spawn } from "node:child_process";
 
-const SOCKET_PATH = path.join(os.homedir(), ".aux4.config", "browser", "browser.sock");
+import { SOCKET_PATH } from "../lib/Paths.js";
 
 export class DaemonClient {
   async send(method, params = {}) {
@@ -11,7 +11,7 @@ export class DaemonClient {
       return await this._connect(method, params);
     } catch (e) {
       if (e.code === "ENOENT" || e.code === "ECONNREFUSED" || e.message?.includes("not running")) {
-        await this._autoStart();
+        await this._autoStart(this._needsLocalBrowser(method, params));
         return await this._connect(method, params);
       }
       throw e;
@@ -48,8 +48,20 @@ export class DaemonClient {
     });
   }
 
-  async _autoStart() {
-    const child = spawn("aux4", ["browser", "start"], {
+  // A request on a provider-backed session ("<provider>:<token>") or an
+  // `open --provider <remote>` never needs the local browser, so the
+  // auto-started daemon skips provisioning/launching it (it is still
+  // launched lazily if a local session is opened later).
+  _needsLocalBrowser(method, params = {}) {
+    if (method === "open") return !params.provider || params.provider === "local";
+    if (typeof params.session === "string" && params.session.includes(":")) return false;
+    return true;
+  }
+
+  async _autoStart(needsLocalBrowser = true) {
+    const args = ["browser", "start"];
+    if (!needsLocalBrowser) args.push("--localBrowser", "false");
+    const child = spawn("aux4", args, {
       detached: true,
       stdio: "ignore",
     });

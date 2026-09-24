@@ -6,9 +6,7 @@ import { SessionManager } from "./SessionManager.js";
 import { BrowserEngine } from "./BrowserEngine.js";
 import { ensureBrowserInstalled } from "./BrowserInstaller.js";
 
-const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
-const SOCKET_PATH = path.join(SOCKET_DIR, "browser.sock");
-const PID_PATH = path.join(SOCKET_DIR, "browser.pid");
+import { BROWSER_DIR as SOCKET_DIR, SOCKET_PATH, PID_PATH } from "../lib/Paths.js";
 
 export class DaemonServer {
   constructor(options = {}) {
@@ -17,6 +15,13 @@ export class DaemonServer {
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
     this.headed = options.headed || false;
+    // false = don't provision/launch the local browser at daemon start; it is
+    // launched lazily on the first LOCAL session instead. Remote sessions
+    // (--provider cdp / agentcore / ...) never need it, which is what lets
+    // the daemon run where no local browser exists (e.g. a serverless VM
+    // that only attaches to a remote browser over CDP).
+    this.localBrowser = options.localBrowser !== false;
+    this.localBrowserPromise = null;
     this.sessionManager = null;
     this.server = null;
     this.browser = null;
@@ -26,23 +31,22 @@ export class DaemonServer {
     fs.mkdirSync(SOCKET_DIR, { recursive: true });
     if (fs.existsSync(SOCKET_PATH)) fs.unlinkSync(SOCKET_PATH);
 
-    // The daemon always launches a LOCAL browser for provider="local"
-    // sessions (the default, and the only kind before CBR-008). Any
-    // provider-backed session (--provider agentcore, ...) gets its own
-    // separate connection via the provider seam in SessionManager.open()/
+    // The daemon's LOCAL browser serves provider="local" sessions (the
+    // default). Any provider-backed session (--provider cdp / agentcore, ...)
+    // gets its own separate connection via SessionManager.open()/
     // resolveSession() — the daemon itself is never "attached" as a whole.
-    ensureBrowserInstalled(this.browserName || "chromium");
+    // With localBrowser=false the local browser is launched lazily, only when
+    // the first local session is opened.
+    if (this.localBrowser) await this.ensureLocalBrowser();
 
-    const launchOptions = {};
-    if (this.channel) launchOptions.channel = this.channel;
-    if (this.browserName) launchOptions.browser = this.browserName;
-    if (this.headed) launchOptions.headed = true;
-    this.browser = await BrowserEngine.launch(launchOptions);
-
-    this.sessionManager = new SessionManager(this.browser, {
+    this.sessionManager = new SessionManager(() => this.ensureLocalBrowser(), {
       maxSessions: this.maxSessions,
       onEmpty: () => {
-        if (!this.persistent) this.stop();
+        // Deferred so the reply to the request that emptied the daemon (e.g.
+        // `close`) is written before the process exits.
+        if (!this.persistent) setTimeout(() => {
+          if (this.sessionManager.sessions.size === 0) this.stop();
+        }, 100);
       }
     });
 
@@ -92,6 +96,22 @@ export class DaemonServer {
       if (screenshot) error.screenshot = screenshot;
       socket.write(JSON.stringify({ error, id: request.id }) + "\n");
     }
+  }
+
+  ensureLocalBrowser() {
+    if (!this.localBrowserPromise) {
+      this.localBrowserPromise = (async () => {
+        ensureBrowserInstalled(this.browserName || "chromium");
+        const launchOptions = {};
+        if (this.channel) launchOptions.channel = this.channel;
+        if (this.browserName) launchOptions.browser = this.browserName;
+        if (this.headed) launchOptions.headed = true;
+        this.browser = await BrowserEngine.launch(launchOptions);
+        return this.browser;
+      })();
+      this.localBrowserPromise.catch(() => { this.localBrowserPromise = null; });
+    }
+    return this.localBrowserPromise;
   }
 
   truncateError(message) {

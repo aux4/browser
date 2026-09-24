@@ -8,7 +8,7 @@ import { ComponentResolver } from "../lib/ComponentResolver.js";
 import { BrowserEngine } from "./BrowserEngine.js";
 import { ProviderBridge } from "./ProviderBridge.js";
 
-const ARTIFACTS_DIR = path.join(os.homedir(), ".aux4.config", "browser", "artifacts");
+import { ARTIFACTS_DIR } from "../lib/Paths.js";
 
 // Provider-backed session ids are "<provider>:<opaque token>" (e.g.
 // "agentcore:eyJ...") so a session opened with --provider agentcore is
@@ -20,6 +20,34 @@ function encodeSessionId(provider, token) {
   return `${provider}:${token}`;
 }
 
+// Built-in provider "cdp": attach to ANY remote Chromium over a CDP WebSocket
+// URL the caller already holds (e.g. a short-lived presigned URL minted by a
+// control plane that owns the remote session). No plugin, no vendor code, no
+// credentials in this process: the token IS the base64url-encoded wsUrl, so the
+// session id "cdp:<base64url(wsUrl)>" is self-contained and any fresh
+// process/daemon can reattach with nothing but the id. Closing a cdp session
+// only disconnects — the remote session's lifecycle belongs to whoever minted
+// the URL.
+const CDP_PROVIDER = "cdp";
+
+function encodeCdpToken(wsUrl) {
+  return Buffer.from(String(wsUrl), "utf-8").toString("base64url");
+}
+
+function decodeCdpToken(token) {
+  const wsUrl = Buffer.from(String(token), "base64url").toString("utf-8");
+  if (!/^wss?:\/\//.test(wsUrl)) throw new Error("browser provider \"cdp\": session token is not a ws:// or wss:// URL");
+  return wsUrl;
+}
+
+async function disconnectQuietly(providerBrowser) {
+  // For a connectOverCDP Browser, close() only drops our WebSocket (Playwright
+  // closes the transport; it does not send Browser.close and does not close
+  // the remote default context), so the remote session survives.
+  if (!providerBrowser) return;
+  try { await providerBrowser.close(); } catch {}
+}
+
 function decodeSessionId(id) {
   const idx = typeof id === "string" ? id.indexOf(":") : -1;
   if (idx === -1) return null;
@@ -27,12 +55,16 @@ function decodeSessionId(id) {
 }
 
 export class SessionManager {
-  constructor(browser, options = {}) {
+  constructor(getLocalBrowser, options = {}) {
     // The daemon's own local browser, used for provider="local" sessions
     // (the default). Provider-backed sessions (e.g. --provider agentcore)
     // each carry their OWN connection (session.providerBrowser) obtained via
     // the provider seam — see open()/resolveSession() and ProviderBridge.js.
-    this.browser = browser;
+    // Accepts either a Browser or an async getter (lazy launch, see
+    // DaemonServer.ensureLocalBrowser).
+    this.getLocalBrowser = typeof getLocalBrowser === "function"
+      ? getLocalBrowser
+      : async () => getLocalBrowser;
     this.sessions = new Map();
     this.maxSessions = options.maxSessions || 20;
     this.onEmpty = options.onEmpty || (() => {});
@@ -83,8 +115,15 @@ export class SessionManager {
     if (!decoded) throw new Error(`Session not found: ${sessionId}`);
 
     const { provider, token } = decoded;
-    const { wsUrl, headers } = await ProviderBridge.attach(provider, { token });
-    if (!wsUrl) throw new Error(`browser provider "${provider}" attach did not return a wsUrl`);
+    let wsUrl;
+    let headers;
+    if (provider === CDP_PROVIDER) {
+      wsUrl = decodeCdpToken(token);
+      headers = {};
+    } else {
+      ({ wsUrl, headers } = await ProviderBridge.attach(provider, { token }));
+      if (!wsUrl) throw new Error(`browser provider "${provider}" attach did not return a wsUrl`);
+    }
 
     const providerBrowser = await BrowserEngine.connect(wsUrl, headers || {});
     const context = providerBrowser.contexts()[0] || await providerBrowser.newContext();
@@ -219,11 +258,18 @@ export class SessionManager {
       // Provider seam: core knows nothing about the provider beyond
       // "give me a wsUrl+headers to connectOverCDP, and an opaque token I can
       // hand back to reattach/close later." See ProviderBridge.js.
-      const opened = await ProviderBridge.open(provider, {
-        awsProfile: params.awsProfile,
-        awsRegion: params.awsRegion,
-        timeout: params.timeout
-      });
+      let opened;
+      if (provider === CDP_PROVIDER) {
+        if (!params.cdpUrl) throw new Error(`browser provider "cdp" requires --cdpUrl <ws(s)://...>`);
+        opened = { token: encodeCdpToken(params.cdpUrl), wsUrl: params.cdpUrl, headers: {} };
+        decodeCdpToken(opened.token);
+      } else {
+        opened = await ProviderBridge.open(provider, {
+          awsProfile: params.awsProfile,
+          awsRegion: params.awsRegion,
+          timeout: params.timeout
+        });
+      }
       if (!opened.token || !opened.wsUrl) {
         throw new Error(`browser provider "${provider}" open did not return a token/wsUrl`);
       }
@@ -250,7 +296,8 @@ export class SessionManager {
         fs.mkdirSync(videoDir, { recursive: true });
         contextOptions.recordVideo = { dir: videoDir };
       }
-      context = await this.browser.newContext(contextOptions);
+      const localBrowser = await this.getLocalBrowser();
+      context = await localBrowser.newContext(contextOptions);
       page = await context.newPage();
       id = crypto.randomUUID().slice(0, 8);
     }
@@ -321,12 +368,14 @@ export class SessionManager {
     clearTimeout(session.timer);
 
     if (session.remote) {
-      if (!detach) {
+      const stopRemote = !detach && session.provider !== CDP_PROVIDER;
+      if (stopRemote) {
         await ProviderBridge.close(session.provider, { token: session.providerToken });
       }
+      await disconnectQuietly(session.providerBrowser);
       this.sessions.delete(sessionId);
       if (this.sessions.size === 0) this.onEmpty();
-      return { status: detach ? "detached" : "closed" };
+      return { status: stopRemote ? "closed" : "detached" };
     }
 
     // Collect video paths before closing context

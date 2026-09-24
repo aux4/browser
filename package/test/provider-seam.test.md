@@ -163,3 +163,92 @@ ok: no colon
 ```expect:partial
 done
 ```
+
+## built-in cdp provider (open --provider cdp --cdpUrl)
+
+```timeout
+30000
+```
+
+### should require --cdpUrl
+
+```execute
+aux4 browser stop > /dev/null 2>&1
+sleep 1
+aux4 browser open --provider cdp --timeout 30s 2>&1
+aux4 browser stop > /dev/null 2>&1
+echo done
+```
+
+```expect:partial
+requires --cdpUrl
+```
+
+### should reject a non-WebSocket URL
+
+```execute
+aux4 browser stop > /dev/null 2>&1
+sleep 1
+aux4 browser open --provider cdp --cdpUrl https://example.com --timeout 30s 2>&1
+aux4 browser stop > /dev/null 2>&1
+echo done
+```
+
+```expect:partial
+session token is not a ws:// or wss:// URL
+```
+
+### should attach straight to the URL (no plugin) and surface its connect failure, never open a local browser
+
+```execute
+aux4 browser stop > /dev/null 2>&1
+sleep 1
+aux4 browser open --provider cdp --cdpUrl ws://127.0.0.1:1/devtools --timeout 30s 2>&1
+aux4 browser list 2>/dev/null
+aux4 browser stop > /dev/null 2>&1
+echo done
+```
+
+```expect:partial
+ECONNREFUSED 127.0.0.1:1
+```
+
+```expect:partial
+[]
+```
+
+### should reattach a cdp:<base64url(wsUrl)> session id from a fresh daemon without any plugin
+
+```execute
+aux4 browser stop > /dev/null 2>&1
+sleep 1
+aux4 browser eval --session cdp:d3M6Ly8xMjcuMC4wLjE6MS9kZXZ0b29scw --script '1' 2>&1
+aux4 browser stop > /dev/null 2>&1
+echo done
+```
+
+```expect:partial
+ECONNREFUSED 127.0.0.1:1
+```
+
+## presign
+
+### should refuse the local provider
+
+```execute
+aux4 browser presign --provider local
+```
+
+```error:partial
+browser presign: --provider must be a remote provider plugin
+```
+
+### should refuse the cdp provider
+
+```execute
+aux4 browser presign --provider cdp
+```
+
+```error:partial
+browser presign: --provider cdp already takes a URL
+```

@@ -86,6 +86,44 @@ aux4/browser core has no knowledge of any specific provider or cloud vendor — 
 `wsUrl`/headers pair to Playwright's CDP attach. If you ask for a `--provider` whose plugin isn't installed,
 `open`/`close` fail with a clear error; they never silently fall back to a local browser.
 
+#### Attaching with a URL only (`--provider cdp`)
+
+`cdp` is built in (no plugin): it attaches to any remote Chromium whose CDP WebSocket URL you already hold —
+typically a short-lived **presigned** URL minted by whoever owns the remote session. The process doing the
+browsing needs no cloud credentials at all:
+
+```bash
+# where credentials live: start a remote session and mint a URL valid for up to 300s
+aux4 browser presign --provider agentcore --timeout 15m --awsProfile my-profile
+```
+
+```json
+{
+  "session": "agentcore:eyJ...",
+  "sessionId": "01M3AJMW60GPF8XCXV6JCC3K7W",
+  "cdpUrl": "wss://...?X-Amz-Signature=...",
+  "cdpSession": "cdp:d3NzOi8v...",
+  "expiresIn": 300,
+  "expiresAt": "2026-09-24T18:30:00.000Z"
+}
+```
+
+```bash
+# anywhere else (no credentials): use the ready-made session id directly...
+aux4 browser visit --session 'cdp:d3NzOi8v...' --url https://example.com
+
+# ...or open with the URL
+aux4 browser open --provider cdp --cdpUrl 'wss://...'
+```
+
+A `cdp:` session id is self-contained, so a brand new process can use it with no prior `open`. `close` on a `cdp`
+session only disconnects — the remote session keeps running and its state is preserved. To continue later, mint
+a fresh URL for the same session (`presign --session agentcore:eyJ...`) and attach again; end the remote session
+with `close --session agentcore:eyJ...` where the credentials are.
+
+**Note:** the daemon only launches a local browser when a local session is opened, so a machine that only uses
+remote sessions never needs a local browser installed.
+
 ### Navigation
 
 ```bash

@@ -13,7 +13,8 @@ export async function OpenCommand(params) {
     waitUntil: params.waitUntil,
     provider: params.provider,
     awsProfile: params.awsProfile,
-    awsRegion: params.awsRegion
+    awsRegion: params.awsRegion,
+    cdpUrl: params.cdpUrl
   });
   if (result.snapshot) {
     console.log(JSON.stringify(result));
