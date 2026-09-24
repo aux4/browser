@@ -6,7 +6,8 @@ export async function SelectCommand(params) {
     session: params.session,
     name: params.name,
     value: params.value,
-    role: params.role
+    role: params.role,
+    ref: params.ref
   });
   console.log(JSON.stringify(result));
 }

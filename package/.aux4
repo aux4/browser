@@ -498,7 +498,7 @@
         {
           "name": "type",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,within)"
+            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,ref,within)"
           ],
           "help": {
             "text": "Type text into an input field",
@@ -511,7 +511,7 @@
               {
                 "name": "name",
                 "text": "Accessible name of the field",
-                "required": true,
+                "default": "",
                 "multiple": true
               },
               {
@@ -524,6 +524,11 @@
                 "name": "role",
                 "text": "ARIA role",
                 "default": "textbox"
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot command), overrides name/role",
+                "default": ""
               },
               {
                 "name": "within",
@@ -567,7 +572,7 @@
         {
           "name": "select",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs select values(session,name,value,role)"
+            "node ${packageDir}/lib/aux4-browser.mjs select values(session,name,value,role,ref)"
           ],
           "help": {
             "text": "Select an option from a dropdown",
@@ -580,7 +585,7 @@
               {
                 "name": "name",
                 "text": "Accessible name of the select element",
-                "required": true
+                "default": ""
               },
               {
                 "name": "value",
@@ -591,6 +596,11 @@
                 "name": "role",
                 "text": "ARIA role",
                 "default": "combobox"
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot command), overrides name/role",
+                "default": ""
               }
             ]
           }
@@ -598,7 +608,7 @@
         {
           "name": "check",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs check values(session,name,role)"
+            "node ${packageDir}/lib/aux4-browser.mjs check values(session,name,role,ref)"
           ],
           "help": {
             "text": "Check a checkbox",
@@ -611,12 +621,17 @@
               {
                 "name": "name",
                 "text": "Accessible name of the checkbox",
-                "required": true
+                "default": ""
               },
               {
                 "name": "role",
                 "text": "ARIA role",
                 "default": "checkbox"
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot command), overrides name/role",
+                "default": ""
               }
             ]
           }
@@ -624,7 +639,7 @@
         {
           "name": "uncheck",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs uncheck values(session,name,role)"
+            "node ${packageDir}/lib/aux4-browser.mjs uncheck values(session,name,role,ref)"
           ],
           "help": {
             "text": "Uncheck a checkbox",
@@ -637,12 +652,17 @@
               {
                 "name": "name",
                 "text": "Accessible name of the checkbox",
-                "required": true
+                "default": ""
               },
               {
                 "name": "role",
                 "text": "ARIA role",
                 "default": "checkbox"
+              },
+              {
+                "name": "ref",
+                "text": "Snapshot ref index (from snapshot command), overrides name/role",
+                "default": ""
               }
             ]
           }

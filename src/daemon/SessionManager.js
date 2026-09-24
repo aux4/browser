@@ -328,6 +328,70 @@ export class SessionManager {
     }
   }
 
+  // Resolve a snapshot ref index (as produced by the `snapshot` command) to a
+  // live Playwright ElementHandle, using the same interactive-role walk as
+  // click()'s ref branch. Shared by type/select/check/uncheck so --ref works
+  // consistently across all element-targeting commands, not just click.
+  async _resolveRefElement(session, ref) {
+    const page = session.pages[session.activeTab];
+    const targetRef = parseInt(ref);
+    const handle = await page.evaluateHandle((targetRef) => {
+      const INTERACTIVE_ROLES = [
+        "button", "link", "textbox", "checkbox", "radio", "combobox", "listbox",
+        "menuitem", "tab", "switch", "searchbox", "slider", "spinbutton", "option"
+      ];
+      const COMPONENT_ROLES = ["table", "form", "list", "navigation", "menu", "dialog", "tablist", "tree"];
+      const implicitRole = (el) => {
+        const tag = el.tagName.toLowerCase();
+        switch (tag) {
+          case "a": return el.hasAttribute("href") ? "link" : null;
+          case "button": return "button";
+          case "input": {
+            const type = (el.getAttribute("type") || "text").toLowerCase();
+            if (type === "checkbox") return "checkbox";
+            if (type === "radio") return "radio";
+            if (type === "submit" || type === "button" || type === "reset") return "button";
+            if (type === "range") return "slider";
+            if (type === "number") return "spinbutton";
+            if (type === "search") return "searchbox";
+            return "textbox";
+          }
+          case "textarea": return "textbox";
+          case "select": return "combobox";
+          case "nav": return "navigation";
+          case "table": return "table";
+          case "form": return "form";
+          case "ul": case "ol": return "list";
+          case "dialog": return "dialog";
+          case "option": return "option";
+          default: return null;
+        }
+      };
+      const isVisible = (el) => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return false;
+        const style = window.getComputedStyle(el);
+        return style.visibility !== "hidden" && style.display !== "none" && style.opacity !== "0";
+      };
+      const allRoles = [...INTERACTIVE_ROLES, ...COMPONENT_ROLES];
+      let ref = 0;
+      for (const el of document.querySelectorAll("*")) {
+        const role = el.getAttribute("role") || implicitRole(el);
+        if (!role || !allRoles.includes(role)) continue;
+        if (!isVisible(el)) continue;
+        ref++;
+        if (ref === targetRef) return el;
+      }
+      return null;
+    }, targetRef);
+    const element = handle.asElement();
+    if (!element) {
+      await handle.dispose();
+      throw new Error(`Snapshot ref [${targetRef}] not found on page`);
+    }
+    return element;
+  }
+
   async click(sessionId, params) {
     const session = this.getSession(sessionId);
     const timeout = parseInt(params.timeout) || 5000;
@@ -454,6 +518,12 @@ export class SessionManager {
 
   async type(sessionId, params) {
     const session = this.getSession(sessionId);
+    if (params.ref != null && params.ref !== "") {
+      const element = await this._resolveRefElement(session, params.ref);
+      await element.fill(params.value);
+      await element.dispose();
+      return this._attachSnapshot(session, { status: "ok" });
+    }
     const base = this.getBase(session, params);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).fill(params.value);
@@ -700,6 +770,12 @@ export class SessionManager {
 
   async select(sessionId, params) {
     const session = this.getSession(sessionId);
+    if (params.ref != null && params.ref !== "") {
+      const element = await this._resolveRefElement(session, params.ref);
+      await element.selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
+      await element.dispose();
+      return this._attachSnapshot(session, { status: "ok" });
+    }
     const base = this.getBase(session, params);
     const role = params.role || "combobox";
     await base.getByRole(role, { name: params.name }).selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
@@ -708,6 +784,12 @@ export class SessionManager {
 
   async check(sessionId, params) {
     const session = this.getSession(sessionId);
+    if (params.ref != null && params.ref !== "") {
+      const element = await this._resolveRefElement(session, params.ref);
+      await element.check({ timeout: parseInt(params.timeout) || 5000 });
+      await element.dispose();
+      return this._attachSnapshot(session, { status: "ok" });
+    }
     const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
@@ -716,6 +798,12 @@ export class SessionManager {
 
   async uncheck(sessionId, params) {
     const session = this.getSession(sessionId);
+    if (params.ref != null && params.ref !== "") {
+      const element = await this._resolveRefElement(session, params.ref);
+      await element.uncheck({ timeout: parseInt(params.timeout) || 5000 });
+      await element.dispose();
+      return this._attachSnapshot(session, { status: "ok" });
+    }
     const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
