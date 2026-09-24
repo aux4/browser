@@ -346,6 +346,27 @@ aux4 browser download --session <id> --url https://example.com/file.pdf --output
 aux4 browser save-pdf --session <id> --output page.pdf --format A4
 ```
 
+### Storage State (stay logged in across sessions)
+
+Save a session's cookies and per-origin `localStorage` to a file, then restore them into another session — including a
+brand new remote (provider-backed) browser — so it picks up already logged in.
+
+```bash
+aux4 browser state save --session <id> --output state.json
+aux4 browser state load --session <new-id> --file state.json
+```
+
+```text
+{"status":"saved","path":"state.json","cookies":12,"origins":2}
+{"status":"loaded","cookies":12,"origins":2}
+```
+
+- `save` writes the file with mode `0600` and prints only counts — the state itself is never printed.
+- `load` adds the cookies and seeds `localStorage` the first time a page of each saved origin loads (the current page too,
+  if its origin matches). Keys the page already has are left alone.
+
+**Note:** a storage state file contains live session cookies. Treat it like a password.
+
 ### Tabs
 
 ```bash

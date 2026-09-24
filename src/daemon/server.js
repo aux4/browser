@@ -158,6 +158,8 @@ export class DaemonServer {
       case "clear-scope": return this.sessionManager.clearScope(params.session);
       case "set-snapshot": return this.sessionManager.setSnapshot(params.session, params.mode);
       case "cookies": return this.sessionManager.cookies(params.session, params);
+      case "state-save": return this.sessionManager.stateSave(params.session, params);
+      case "state-load": return this.sessionManager.stateLoad(params.session, params);
       case "download": return this.sessionManager.download(params.session, params);
       case "save-pdf": return this.sessionManager.savePdf(params.session, params);
       case "new-tab": return this.sessionManager.newTab(params.session, params.url);

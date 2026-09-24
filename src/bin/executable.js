@@ -22,6 +22,7 @@ import { WaitCommand } from "../commands/WaitCommand.js";
 import { EvalCommand } from "../commands/EvalCommand.js";
 import { ExpectCommand } from "../commands/ExpectCommand.js";
 import { CookiesCommand } from "../commands/CookiesCommand.js";
+import { StateSaveCommand, StateLoadCommand } from "../commands/StateCommand.js";
 import { DownloadCommand } from "../commands/DownloadCommand.js";
 import { SavePdfCommand } from "../commands/SavePdfCommand.js";
 import { NewTabCommand, SwitchTabCommand, CloseTabCommand, ListTabsCommand } from "../commands/TabsCommand.js";
@@ -67,6 +68,8 @@ const commands = {
   "expect-list": { handler: ExpectListCommand, args: ["session", "assertion", "expected", "selector", "timeout"] },
   "get-items": { handler: GetItemsCommand, args: ["session", "selector"] },
   cookies:     { handler: CookiesCommand,  args: ["session", "export", "import"] },
+  "state-save": { handler: StateSaveCommand, args: ["session", "output"] },
+  "state-load": { handler: StateLoadCommand, args: ["session", "file"] },
   download:    { handler: DownloadCommand, args: ["session", "url", "output"] },
   "save-pdf":  { handler: SavePdfCommand,  args: ["session", "output", "format", "printBackground"] },
   select:      { handler: SelectCommand,   args: ["session", "name", "value", "role", "ref"] },

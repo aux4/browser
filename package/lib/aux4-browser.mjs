@@ -1556,6 +1556,74 @@ class SessionManager {
     return { cookies };
   }
 
+  // Playwright storageState ({cookies, origins:[{origin, localStorage}]}) —
+  // the "logged-in-ness" of a session, so a later session (possibly a brand
+  // new remote browser) can pick up where this one left off. The state IS a
+  // credential (session cookies), so it only ever goes to a file (mode 0600);
+  // the daemon's response carries counts only, never the state itself.
+  async stateSave(sessionId, params = {}) {
+    const session = await this.resolveSession(sessionId);
+    const output = params.output || "";
+    if (!output) throw new Error("state save: --output <file> is required");
+    const state = await session.context.storageState();
+    const summary = {
+      cookies: (state.cookies || []).length,
+      origins: (state.origins || []).length
+    };
+    fs.mkdirSync(path.dirname(path.resolve(output)), { recursive: true });
+    fs.writeFileSync(output, JSON.stringify(state), { mode: 0o600 });
+    fs.chmodSync(output, 0o600);
+    return { status: "saved", path: output, ...summary };
+  }
+
+  // Apply a storageState to an EXISTING session: cookies via addCookies, and
+  // localStorage via an init script that seeds each saved origin's keys the
+  // first time a page of that origin loads (keys the page already has are
+  // left alone, so the app's own later writes are never clobbered). The
+  // current page is seeded too when its origin matches. Works the same on a
+  // local context and a provider-attached (CDP) one.
+  async stateLoad(sessionId, params = {}) {
+    const session = await this.resolveSession(sessionId);
+    const file = params.file || "";
+    if (!file) throw new Error("state load: --file <file> is required");
+    let state;
+    try {
+      state = JSON.parse(fs.readFileSync(file, "utf-8"));
+    } catch (e) {
+      throw new Error(`state load: cannot read storage state from ${file}: ${e.code || "invalid JSON"}`);
+    }
+    if (!state || typeof state !== "object" || Array.isArray(state)) {
+      throw new Error("state load: file is not a storage state object ({cookies, origins})");
+    }
+    const cookies = Array.isArray(state.cookies) ? state.cookies : [];
+    const origins = (Array.isArray(state.origins) ? state.origins : [])
+      .filter(o => o && typeof o.origin === "string" && Array.isArray(o.localStorage));
+
+    if (cookies.length) await session.context.addCookies(cookies);
+
+    if (origins.length) {
+      const seed = (saved) => {
+        try {
+          const entry = saved.find(o => o.origin === location.origin);
+          if (!entry) return;
+          for (const item of entry.localStorage) {
+            if (item && typeof item.name === "string" && localStorage.getItem(item.name) === null) {
+              localStorage.setItem(item.name, String(item.value));
+            }
+          }
+        } catch {
+          // opaque origins (about:blank, data:) have no localStorage
+        }
+      };
+      await session.context.addInitScript(seed, origins);
+      for (const page of session.context.pages()) {
+        try { await page.evaluate(seed, origins); } catch { /* page closed / navigating */ }
+      }
+    }
+
+    return { status: "loaded", cookies: cookies.length, origins: origins.length };
+  }
+
   async savePdf(sessionId, params) {
     const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
@@ -2082,6 +2150,8 @@ class DaemonServer {
       case "clear-scope": return this.sessionManager.clearScope(params.session);
       case "set-snapshot": return this.sessionManager.setSnapshot(params.session, params.mode);
       case "cookies": return this.sessionManager.cookies(params.session, params);
+      case "state-save": return this.sessionManager.stateSave(params.session, params);
+      case "state-load": return this.sessionManager.stateLoad(params.session, params);
       case "download": return this.sessionManager.download(params.session, params);
       case "save-pdf": return this.sessionManager.savePdf(params.session, params);
       case "new-tab": return this.sessionManager.newTab(params.session, params.url);
@@ -2523,6 +2593,24 @@ async function CookiesCommand(params) {
   console.log(JSON.stringify(result));
 }
 
+async function StateSaveCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("state-save", {
+    session: params.session,
+    output: params.output
+  });
+  console.log(JSON.stringify(result));
+}
+
+async function StateLoadCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("state-load", {
+    session: params.session,
+    file: params.file
+  });
+  console.log(JSON.stringify(result));
+}
+
 async function DownloadCommand(params) {
   const client = new DaemonClient();
   const output = params.output ? path.resolve(params.output) : undefined;
@@ -2762,6 +2850,8 @@ const commands = {
   "expect-list": { handler: ExpectListCommand, args: ["session", "assertion", "expected", "selector", "timeout"] },
   "get-items": { handler: GetItemsCommand, args: ["session", "selector"] },
   cookies:     { handler: CookiesCommand,  args: ["session", "export", "import"] },
+  "state-save": { handler: StateSaveCommand, args: ["session", "output"] },
+  "state-load": { handler: StateLoadCommand, args: ["session", "file"] },
   download:    { handler: DownloadCommand, args: ["session", "url", "output"] },
   "save-pdf":  { handler: SavePdfCommand,  args: ["session", "output", "format", "printBackground"] },
   select:      { handler: SelectCommand,   args: ["session", "name", "value", "role", "ref"] },

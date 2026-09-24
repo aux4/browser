@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.23",
+  "version": "1.0.25",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -1035,6 +1035,15 @@
           }
         },
         {
+          "name": "state",
+          "execute": [
+            "profile:browser:state"
+          ],
+          "help": {
+            "text": "Save or restore a session's storage state (cookies + localStorage) so a later session stays logged in"
+          }
+        },
+        {
           "name": "download",
           "execute": [
             "node ${packageDir}/lib/aux4-browser.mjs download values(session,url,output)"
@@ -1448,6 +1457,51 @@
           ],
           "help": {
             "text": "TEST FIXTURE ONLY: a provider-open that returns invalid JSON, used to test that the provider seam fails loudly instead of falling back to a local browser."
+          }
+        }
+      ]
+    },
+    {
+      "name": "browser:state",
+      "commands": [
+        {
+          "name": "save",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs state-save values(session,output)"
+          ],
+          "help": {
+            "text": "Write the session's storage state (cookies + localStorage per origin) to a file created with mode 0600",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID (local or provider-backed, e.g. cdp:...)"
+              },
+              {
+                "name": "output",
+                "text": "File to write the storage state JSON to (created with mode 0600)",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "load",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs state-load values(session,file)"
+          ],
+          "help": {
+            "text": "Apply a saved storage state to an existing session: adds the cookies and seeds localStorage for each saved origin",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID (local or provider-backed, e.g. cdp:...)"
+              },
+              {
+                "name": "file",
+                "text": "Storage state JSON file, as written by `browser state save`",
+                "default": ""
+              }
+            ]
           }
         }
       ]
