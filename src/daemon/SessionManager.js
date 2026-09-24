@@ -7,6 +7,7 @@ import { SnapshotBuilder } from "../lib/SnapshotBuilder.js";
 import { ComponentResolver } from "../lib/ComponentResolver.js";
 import { BrowserEngine } from "./BrowserEngine.js";
 import { ProviderBridge } from "./ProviderBridge.js";
+import { fingerprintSessionId } from "../lib/Redact.js";
 
 import { ARTIFACTS_DIR } from "../lib/Paths.js";
 
@@ -401,12 +402,16 @@ export class SessionManager {
     return { status: "closed" };
   }
 
+  // Status listing (CBR-015): the caller already holds every real session id
+  // it opened, so a "which sessions are active" display never needs to
+  // re-print the full provider-backed id (a bearer credential for "cdp"
+  // sessions) — a short fingerprint is enough to recognize it.
   list() {
     const result = [];
     for (const [id, session] of this.sessions) {
       const activePage = session.pages[session.activeTab];
       result.push({
-        id, url: activePage ? activePage.url() : "",
+        id: fingerprintSessionId(id), url: activePage ? activePage.url() : "",
         tabs: session.pages.length, createdAt: session.createdAt
       });
     }

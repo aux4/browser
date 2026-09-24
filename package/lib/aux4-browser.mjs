@@ -488,6 +488,50 @@ const ProviderBridge = {
   close: (provider, params) => runProviderCommand(provider, "close", params)
 };
 
+// Redaction helpers (CBR-015). Provider-backed session ids can be bearer
+// credentials in disguise: the built-in "cdp" provider's id is literally
+// "cdp:<base64url(wsUrl)>" — a short-lived (<=300s) presigned WebSocket URL
+// with its auth in the query string (e.g. X-Amz-Signature). "<provider>:<token>"
+// ids minted by a plugin (e.g. "agentcore:<token>") can likewise embed
+// reattach material. None of that belongs in a status listing, a log line,
+// or an error message: it does not help debug the failure, and every extra
+// place it is printed is another place it can leak (shell history, CI logs,
+// a ledger comment). Functional input handling is NOT affected — commands
+// still accept the real, full session id via --session/--cdpUrl; only
+// DISPLAY of a session's own identity in non-functional output is redacted.
+
+// fingerprintSessionId("cdp:eyJhbGciOi...") -> "cdp:...a1b2c3"
+// fingerprintSessionId("agentcore:eyJhbGciOi...") -> "agentcore:...a1b2c3"
+// Plain local ids (no ":") are returned unchanged — they carry no secret.
+function fingerprintSessionId(id) {
+  if (typeof id !== "string") return id;
+  const idx = id.indexOf(":");
+  if (idx < 0) return id;
+  const provider = id.slice(0, idx);
+  const token = id.slice(idx + 1);
+  if (token.length <= 6) return `${provider}:...${token}`;
+  return `${provider}:...${token.slice(-6)}`;
+}
+
+// Strips the query string (where SigV4 presigned auth lives — X-Amz-Signature,
+// X-Amz-Credential, etc.) from any ws://, wss://, http:// or https:// URL
+// found inside a message, and collapses any bare "<provider>:<token>"
+// session id to its fingerprint. Used on every error message before it
+// leaves the daemon (server.js) so a connectOverCDP failure, a decode
+// failure, or any other error can never carry the presigned URL/signature
+// or a full session token back to the caller/logs.
+function sanitizeMessage(message) {
+  if (typeof message !== "string") return message;
+  let out = message.replace(
+    /\b(wss?|https?):\/\/[^\s"')]+/gi,
+    (url) => url.split("?")[0] + (url.includes("?") ? "?<redacted>" : "")
+  );
+  out = out.replace(/\b(cdp|agentcore|[a-z0-9-]{2,20}):[A-Za-z0-9_\-.]{20,}\b/gi, (m) =>
+    fingerprintSessionId(m)
+  );
+  return out;
+}
+
 // Where the daemon keeps its socket, pid file and artifacts.
 //
 // Default: ~/.aux4.config/browser. Override with AUX4_BROWSER_DIR. When the
@@ -908,12 +952,16 @@ class SessionManager {
     return { status: "closed" };
   }
 
+  // Status listing (CBR-015): the caller already holds every real session id
+  // it opened, so a "which sessions are active" display never needs to
+  // re-print the full provider-backed id (a bearer credential for "cdp"
+  // sessions) — a short fingerprint is enough to recognize it.
   list() {
     const result = [];
     for (const [id, session] of this.sessions) {
       const activePage = session.pages[session.activeTab];
       result.push({
-        id, url: activePage ? activePage.url() : "",
+        id: fingerprintSessionId(id), url: activePage ? activePage.url() : "",
         tabs: session.pages.length, createdAt: session.createdAt
       });
     }
@@ -1969,7 +2017,7 @@ class DaemonServer {
           screenshot = await this.sessionManager.screenshotOnError(session);
         } catch {}
       }
-      const error = { message: this.truncateError(e.message) };
+      const error = { message: sanitizeMessage(this.truncateError(e.message)) };
       if (screenshot) error.screenshot = screenshot;
       socket.write(JSON.stringify({ error, id: request.id }) + "\n");
     }

@@ -5,6 +5,7 @@ import os from "node:os";
 import { SessionManager } from "./SessionManager.js";
 import { BrowserEngine } from "./BrowserEngine.js";
 import { ensureBrowserInstalled } from "./BrowserInstaller.js";
+import { sanitizeMessage } from "../lib/Redact.js";
 
 import { BROWSER_DIR as SOCKET_DIR, SOCKET_PATH, PID_PATH } from "../lib/Paths.js";
 
@@ -92,7 +93,7 @@ export class DaemonServer {
           screenshot = await this.sessionManager.screenshotOnError(session);
         } catch {}
       }
-      const error = { message: this.truncateError(e.message) };
+      const error = { message: sanitizeMessage(this.truncateError(e.message)) };
       if (screenshot) error.screenshot = screenshot;
       socket.write(JSON.stringify({ error, id: request.id }) + "\n");
     }
