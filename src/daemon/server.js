@@ -5,6 +5,7 @@ import os from "node:os";
 import { SessionManager } from "./SessionManager.js";
 import { BrowserEngine } from "./BrowserEngine.js";
 import { ensureBrowserInstalled } from "./BrowserInstaller.js";
+import { AgentCoreClient, wsUrl as agentcoreWsUrl } from "./AgentCoreClient.js";
 
 const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
 const SOCKET_PATH = path.join(SOCKET_DIR, "browser.sock");
@@ -17,6 +18,8 @@ export class DaemonServer {
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
     this.headed = options.headed || false;
+    // Remote (AgentCore) attach mode: { sessionId, region, profile, browserIdentifier }
+    this.agentcore = options.agentcore || null;
     this.sessionManager = null;
     this.server = null;
     this.browser = null;
@@ -26,18 +29,34 @@ export class DaemonServer {
     fs.mkdirSync(SOCKET_DIR, { recursive: true });
     if (fs.existsSync(SOCKET_PATH)) fs.unlinkSync(SOCKET_PATH);
 
-    // Defensive self-heal for when the daemon is launched directly (not via the
-    // StartCommand parent, which already provisions the browser). No-op/quiet
-    // when the browser is already present.
-    ensureBrowserInstalled(this.browserName || "chromium");
+    if (this.agentcore) {
+      const client = new AgentCoreClient({ region: this.agentcore.region, profile: this.agentcore.profile });
+      const headers = await client.signedConnectHeaders({
+        sessionId: this.agentcore.sessionId,
+        browserIdentifier: this.agentcore.browserIdentifier
+      });
+      const url = agentcoreWsUrl({
+        region: this.agentcore.region,
+        browserIdentifier: this.agentcore.browserIdentifier,
+        sessionId: this.agentcore.sessionId
+      });
+      this.browser = await BrowserEngine.connect(url, headers);
+    } else {
+      // Defensive self-heal for when the daemon is launched directly (not via the
+      // StartCommand parent, which already provisions the browser). No-op/quiet
+      // when the browser is already present.
+      ensureBrowserInstalled(this.browserName || "chromium");
 
-    const launchOptions = {};
-    if (this.channel) launchOptions.channel = this.channel;
-    if (this.browserName) launchOptions.browser = this.browserName;
-    if (this.headed) launchOptions.headed = true;
-    this.browser = await BrowserEngine.launch(launchOptions);
+      const launchOptions = {};
+      if (this.channel) launchOptions.channel = this.channel;
+      if (this.browserName) launchOptions.browser = this.browserName;
+      if (this.headed) launchOptions.headed = true;
+      this.browser = await BrowserEngine.launch(launchOptions);
+    }
+
     this.sessionManager = new SessionManager(this.browser, {
       maxSessions: this.maxSessions,
+      remote: !!this.agentcore,
       onEmpty: () => {
         if (!this.persistent) this.stop();
       }
@@ -153,7 +172,13 @@ export class DaemonServer {
 
   async stop() {
     if (this.sessionManager) await this.sessionManager.closeAll();
-    if (this.browser) await this.browser.close();
+    // In agentcore mode, DON'T call browser.close() — even though
+    // Playwright's connectOverCDP-obtained Browser is documented to only
+    // disconnect (not terminate) the remote browser, we avoid the CDP
+    // round-trip entirely for the detach case: just drop the local
+    // WebSocket by letting the process exit. This is what "detach must not
+    // end the AgentCore session" means operationally.
+    if (this.browser && !this.agentcore) await this.browser.close();
     if (this.server) this.server.close();
     try { fs.unlinkSync(SOCKET_PATH); } catch {}
     try { fs.unlinkSync(PID_PATH); } catch {}

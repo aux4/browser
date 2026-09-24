@@ -18,6 +18,8 @@ export default {
     'node:net', 'node:fs', 'node:path', 'node:os', 'node:crypto', 'node:child_process',
     'fs', 'path', 'stream', 'util', 'events', 'buffer', 'string_decoder', 'crypto', 'os',
     'tty', 'process', 'child_process', 'net',
-    'playwright'
+    'playwright',
+    '@aws-sdk/client-bedrock-agentcore',
+    '@aws-sdk/credential-provider-node'
   ]
 };

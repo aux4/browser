@@ -43,7 +43,7 @@
         {
           "name": "start",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs start values(maxSessions,persistent,channel,browser,headed)"
+            "node ${packageDir}/lib/aux4-browser.mjs start values(maxSessions,persistent,channel,browser,headed,agentcoreSessionId,awsRegion,awsProfile,agentcoreBrowserId)"
           ],
           "help": {
             "text": "Start the browser daemon",
@@ -72,6 +72,122 @@
                 "name": "headed",
                 "text": "Run a visible (headed) browser window instead of headless — strongly reduces bot detection",
                 "default": "false"
+              },
+              {
+                "name": "agentcoreSessionId",
+                "text": "SPIKE: attach to this Amazon Bedrock AgentCore Browser session id (over CDP) instead of launching a local browser",
+                "default": ""
+              },
+              {
+                "name": "awsRegion",
+                "text": "SPIKE: AWS region for the AgentCore session",
+                "default": "us-east-1"
+              },
+              {
+                "name": "awsProfile",
+                "text": "SPIKE: AWS profile used to sign the CDP connect request",
+                "default": ""
+              },
+              {
+                "name": "agentcoreBrowserId",
+                "text": "SPIKE: AgentCore browser identifier",
+                "default": "aws.browser.v1"
+              }
+            ]
+          }
+        },
+        {
+          "name": "agentcore-start",
+          "private": true,
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs agentcore-start values(name,timeoutSeconds,awsRegion,awsProfile,agentcoreBrowserId)"
+          ],
+          "help": {
+            "text": "SPIKE (CBR-002/003): start an Amazon Bedrock AgentCore Browser session",
+            "variables": [
+              {
+                "name": "name",
+                "text": "Session name",
+                "default": "aux4-browser-agentcore"
+              },
+              {
+                "name": "timeoutSeconds",
+                "text": "Session timeout in seconds (absolute lifetime, max 28800)",
+                "default": "900"
+              },
+              {
+                "name": "awsRegion",
+                "text": "AWS region",
+                "default": "us-east-1"
+              },
+              {
+                "name": "awsProfile",
+                "text": "AWS profile",
+                "default": ""
+              },
+              {
+                "name": "agentcoreBrowserId",
+                "text": "AgentCore browser identifier",
+                "default": "aws.browser.v1"
+              }
+            ]
+          }
+        },
+        {
+          "name": "agentcore-stop",
+          "private": true,
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs agentcore-stop values(sessionId,awsRegion,awsProfile,agentcoreBrowserId)"
+          ],
+          "help": {
+            "text": "SPIKE (CBR-002/003): stop an Amazon Bedrock AgentCore Browser session",
+            "variables": [
+              {
+                "name": "sessionId",
+                "text": "AgentCore session id",
+                "arg": true
+              },
+              {
+                "name": "awsRegion",
+                "text": "AWS region",
+                "default": "us-east-1"
+              },
+              {
+                "name": "awsProfile",
+                "text": "AWS profile",
+                "default": ""
+              },
+              {
+                "name": "agentcoreBrowserId",
+                "text": "AgentCore browser identifier",
+                "default": "aws.browser.v1"
+              }
+            ]
+          }
+        },
+        {
+          "name": "agentcore-list",
+          "private": true,
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs agentcore-list values(awsRegion,awsProfile,agentcoreBrowserId)"
+          ],
+          "help": {
+            "text": "SPIKE (CBR-002/003): list active Amazon Bedrock AgentCore Browser sessions",
+            "variables": [
+              {
+                "name": "awsRegion",
+                "text": "AWS region",
+                "default": "us-east-1"
+              },
+              {
+                "name": "awsProfile",
+                "text": "AWS profile",
+                "default": ""
+              },
+              {
+                "name": "agentcoreBrowserId",
+                "text": "AgentCore browser identifier",
+                "default": "aws.browser.v1"
               }
             ]
           }

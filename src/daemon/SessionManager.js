@@ -14,6 +14,12 @@ export class SessionManager {
     this.sessions = new Map();
     this.maxSessions = options.maxSessions || 20;
     this.onEmpty = options.onEmpty || (() => {});
+    // Remote mode (e.g. attached to an AgentCore Browser session over CDP):
+    // reuse the ALREADY-EXISTING default context/page instead of creating a
+    // fresh context per aux4/browser "session" and never close that shared
+    // context — AgentCore allows exactly one automation stream per session,
+    // and the whole point is to survive detach/reattach across invocations.
+    this.remote = options.remote || false;
   }
 
   _writeArtifact(name, content, outputPath) {
@@ -149,20 +155,32 @@ export class SessionManager {
     const outputDir = params.output || "";
     const videoMode = params.video || "off";
 
-    const contextOptions = {
-      viewport: {
-        width: parseInt(params.width) || 1280,
-        height: parseInt(params.height) || 720
+    let context;
+    let page;
+    if (this.remote) {
+      // Reuse the remote browser's existing default context/page (created by
+      // AgentCore, not by us). Only fall back to creating one if the remote
+      // browser truly has none yet (first attach).
+      context = this.browser.contexts()[0];
+      if (!context) context = await this.browser.newContext();
+      page = context.pages()[0];
+      if (!page) page = await context.newPage();
+    } else {
+      const contextOptions = {
+        viewport: {
+          width: parseInt(params.width) || 1280,
+          height: parseInt(params.height) || 720
+        }
+      };
+      if (outputDir && videoMode !== "off") {
+        const videoDir = path.join(outputDir, "videos");
+        fs.mkdirSync(videoDir, { recursive: true });
+        contextOptions.recordVideo = { dir: videoDir };
       }
-    };
-    if (outputDir && videoMode !== "off") {
-      const videoDir = path.join(outputDir, "videos");
-      fs.mkdirSync(videoDir, { recursive: true });
-      contextOptions.recordVideo = { dir: videoDir };
+      context = await this.browser.newContext(contextOptions);
+      page = await context.newPage();
     }
-    const context = await this.browser.newContext(contextOptions);
 
-    const page = await context.newPage();
     let response = null;
     if (params.url && params.url !== "") {
       response = await this._navigate(page, params.url, params.waitUntil);
@@ -173,7 +191,8 @@ export class SessionManager {
       id, context, pages: [page], activeTab: 0,
       timeout, createdAt: Date.now(), lastActivity: Date.now(),
       timer: setTimeout(() => this.close(id), timeout),
-      outputDir, videoMode, hadError: false, snapshotMode
+      outputDir, videoMode, hadError: false, snapshotMode,
+      remote: this.remote
     };
 
     this.sessions.set(id, session);
@@ -214,6 +233,16 @@ export class SessionManager {
     const session = this.sessions.get(sessionId);
     if (!session) throw new Error(`Session not found: ${sessionId}`);
     clearTimeout(session.timer);
+
+    // Remote (AgentCore) sessions: "close" only means "stop tracking it
+    // locally" — never close the shared context/page, that would tear down
+    // the one automation stream AgentCore allows and defeats the whole
+    // detach/reattach point of this mode.
+    if (session.remote) {
+      this.sessions.delete(sessionId);
+      if (this.sessions.size === 0) this.onEmpty();
+      return { status: "detached" };
+    }
 
     // Collect video paths before closing context
     const videoPaths = [];

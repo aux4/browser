@@ -36,13 +36,17 @@ import { SetSnapshotCommand } from "../commands/SetSnapshotCommand.js";
 import { ComponentCommand } from "../commands/ComponentCommand.js";
 import { SnapshotCommand } from "../commands/SnapshotCommand.js";
 import { ReadCommand } from "../commands/ReadCommand.js";
+import { AgentCoreStartCommand, AgentCoreStopCommand, AgentCoreListCommand } from "../commands/AgentCoreCommand.js";
 
 const args = process.argv.slice(2);
 const action = args[0];
 const values = args.slice(1);
 
 const commands = {
-  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed"] },
+  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed", "agentcoreSessionId", "awsRegion", "awsProfile", "agentcoreBrowserId"] },
+  "agentcore-start": { handler: AgentCoreStartCommand, args: ["name", "timeoutSeconds", "awsRegion", "awsProfile", "agentcoreBrowserId"] },
+  "agentcore-stop":  { handler: AgentCoreStopCommand,  args: ["sessionId", "awsRegion", "awsProfile", "agentcoreBrowserId"] },
+  "agentcore-list":  { handler: AgentCoreListCommand,  args: ["awsRegion", "awsProfile", "agentcoreBrowserId"] },
   stop:        { handler: StopCommand,     args: [] },
   open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil"] },
   close:       { handler: CloseCommand,    args: ["session"] },

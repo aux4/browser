@@ -40,6 +40,9 @@ function waitForSocket(maxAttempts = 30) {
 }
 
 export async function StartCommand(params) {
+  const agentcoreSessionId = params.agentcoreSessionId || "";
+  const isAgentCore = agentcoreSessionId !== "";
+
   // If running as the forked daemon child, start server directly
   if (process.env.AUX4_BROWSER_DAEMON === "1") {
     const server = new DaemonServer({
@@ -47,7 +50,13 @@ export async function StartCommand(params) {
       persistent: params.persistent === "true" || params.persistent === true,
       channel: params.channel || "",
       browser: params.browser || "",
-      headed: params.headed === "true" || params.headed === true
+      headed: params.headed === "true" || params.headed === true,
+      agentcore: isAgentCore ? {
+        sessionId: agentcoreSessionId,
+        region: params.awsRegion || "us-east-1",
+        profile: params.awsProfile || "",
+        browserIdentifier: params.agentcoreBrowserId || "aws.browser.v1"
+      } : null
     });
     await server.start();
     return;
@@ -62,7 +71,8 @@ export async function StartCommand(params) {
   // Self-provision the browser binary in the foreground (before forking the
   // detached daemon) so the "installing…" notice is visible to the user and the
   // daemon child never blocks on a download while waitForSocket() is ticking.
-  ensureBrowserInstalled(params.browser || "chromium");
+  // Not needed in agentcore mode — the browser is remote, nothing to install.
+  if (!isAgentCore) ensureBrowserInstalled(params.browser || "chromium");
 
   // Fork the daemon to the background
   const child = spawn(process.execPath, process.argv.slice(1), {
