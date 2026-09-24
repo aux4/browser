@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.22",
+  "version": "1.0.22-local-local",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -43,7 +43,7 @@
         {
           "name": "start",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs start values(maxSessions,persistent,channel,browser,headed,agentcoreSessionId,awsRegion,awsProfile,agentcoreBrowserId)"
+            "node ${packageDir}/lib/aux4-browser.mjs start values(maxSessions,persistent,channel,browser,headed)"
           ],
           "help": {
             "text": "Start the browser daemon",
@@ -72,122 +72,6 @@
                 "name": "headed",
                 "text": "Run a visible (headed) browser window instead of headless — strongly reduces bot detection",
                 "default": "false"
-              },
-              {
-                "name": "agentcoreSessionId",
-                "text": "SPIKE: attach to this Amazon Bedrock AgentCore Browser session id (over CDP) instead of launching a local browser",
-                "default": ""
-              },
-              {
-                "name": "awsRegion",
-                "text": "SPIKE: AWS region for the AgentCore session",
-                "default": "us-east-1"
-              },
-              {
-                "name": "awsProfile",
-                "text": "SPIKE: AWS profile used to sign the CDP connect request",
-                "default": ""
-              },
-              {
-                "name": "agentcoreBrowserId",
-                "text": "SPIKE: AgentCore browser identifier",
-                "default": "aws.browser.v1"
-              }
-            ]
-          }
-        },
-        {
-          "name": "agentcore-start",
-          "private": true,
-          "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs agentcore-start values(name,timeoutSeconds,awsRegion,awsProfile,agentcoreBrowserId)"
-          ],
-          "help": {
-            "text": "SPIKE (CBR-002/003): start an Amazon Bedrock AgentCore Browser session",
-            "variables": [
-              {
-                "name": "name",
-                "text": "Session name",
-                "default": "aux4-browser-agentcore"
-              },
-              {
-                "name": "timeoutSeconds",
-                "text": "Session timeout in seconds (absolute lifetime, max 28800)",
-                "default": "900"
-              },
-              {
-                "name": "awsRegion",
-                "text": "AWS region",
-                "default": "us-east-1"
-              },
-              {
-                "name": "awsProfile",
-                "text": "AWS profile",
-                "default": ""
-              },
-              {
-                "name": "agentcoreBrowserId",
-                "text": "AgentCore browser identifier",
-                "default": "aws.browser.v1"
-              }
-            ]
-          }
-        },
-        {
-          "name": "agentcore-stop",
-          "private": true,
-          "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs agentcore-stop values(sessionId,awsRegion,awsProfile,agentcoreBrowserId)"
-          ],
-          "help": {
-            "text": "SPIKE (CBR-002/003): stop an Amazon Bedrock AgentCore Browser session",
-            "variables": [
-              {
-                "name": "sessionId",
-                "text": "AgentCore session id",
-                "arg": true
-              },
-              {
-                "name": "awsRegion",
-                "text": "AWS region",
-                "default": "us-east-1"
-              },
-              {
-                "name": "awsProfile",
-                "text": "AWS profile",
-                "default": ""
-              },
-              {
-                "name": "agentcoreBrowserId",
-                "text": "AgentCore browser identifier",
-                "default": "aws.browser.v1"
-              }
-            ]
-          }
-        },
-        {
-          "name": "agentcore-list",
-          "private": true,
-          "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs agentcore-list values(awsRegion,awsProfile,agentcoreBrowserId)"
-          ],
-          "help": {
-            "text": "SPIKE (CBR-002/003): list active Amazon Bedrock AgentCore Browser sessions",
-            "variables": [
-              {
-                "name": "awsRegion",
-                "text": "AWS region",
-                "default": "us-east-1"
-              },
-              {
-                "name": "awsProfile",
-                "text": "AWS profile",
-                "default": ""
-              },
-              {
-                "name": "agentcoreBrowserId",
-                "text": "AgentCore browser identifier",
-                "default": "aws.browser.v1"
               }
             ]
           }
@@ -204,7 +88,7 @@
         {
           "name": "open",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil)"
+            "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil,provider,awsProfile,awsRegion)"
           ],
           "help": {
             "text": "Open a new browser session",
@@ -248,6 +132,21 @@
                 "name": "waitUntil",
                 "text": "Navigation wait strategy: domcontentloaded, load, networkidle, settle",
                 "default": "load"
+              },
+              {
+                "name": "provider",
+                "text": "Where to run the browser: local (default) or a provider name from an installed plugin (e.g. agentcore)",
+                "default": "local"
+              },
+              {
+                "name": "awsProfile",
+                "text": "AWS profile to use when --provider requires AWS credentials (e.g. agentcore)",
+                "default": ""
+              },
+              {
+                "name": "awsRegion",
+                "text": "AWS region to use when --provider requires an AWS region (e.g. agentcore)",
+                "default": ""
               }
             ]
           }
@@ -1437,6 +1336,60 @@
                 "default": ""
               }
             ]
+          }
+        },
+        {
+          "name": "mock-open",
+          "private": true,
+          "execute": [
+            "echo '{\"token\":\"tok-abc\",\"wsUrl\":\"ws://127.0.0.1:1/mock\",\"headers\":{}}'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: fake provider-open used by browser package tests to exercise the provider seam without AWS. Never a real provider."
+          }
+        },
+        {
+          "name": "mock-attach",
+          "private": true,
+          "execute": [
+            "echo '{\"wsUrl\":\"ws://127.0.0.1:1/mock\",\"headers\":{}}'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: fake provider-attach used by browser package tests to exercise the provider seam without AWS. Never a real provider.",
+            "variables": [
+              {
+                "name": "token",
+                "text": "opaque token (ignored by the fixture)",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "mock-close",
+          "private": true,
+          "execute": [
+            "echo '{\"status\":\"closed\"}'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: fake provider-close used by browser package tests to exercise the provider seam without AWS. Never a real provider.",
+            "variables": [
+              {
+                "name": "token",
+                "text": "opaque token (ignored by the fixture)",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "broken-open",
+          "private": true,
+          "execute": [
+            "echo 'not-json'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: a provider-open that returns invalid JSON, used to test that the provider seam fails loudly instead of falling back to a local browser."
           }
         }
       ]

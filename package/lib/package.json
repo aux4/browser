@@ -4,8 +4,6 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@aws-sdk/client-bedrock-agentcore": "^3.1139.0",
-    "@aws-sdk/credential-provider-node": "^3.972.84",
     "playwright": "^1.52.0"
   }
 }

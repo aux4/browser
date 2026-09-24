@@ -58,6 +58,34 @@ aux4 browser close --session <id>
 aux4 browser stop
 ```
 
+### Providers (remote browsers)
+
+By default `browser open` launches (or reuses) a browser on this machine — that's `--provider local`, unchanged
+from above. Installing a provider plugin adds other values for `--provider` that instead run the browser
+somewhere else and attach to it over CDP:
+
+```bash
+aux4 aux4 pkger install aux4/browser-agentcore
+
+aux4 browser open --provider agentcore --awsProfile my-profile --awsRegion us-east-1
+```
+
+The returned `--session` id works with every other `browser` command exactly like a local session — `visit`,
+`click`, `type`, `content`, `close`, all of it. Two things are different for a provider-backed session:
+
+- **It survives the local daemon restarting.** Stopping the daemon (`browser stop`, or its idle auto-shutdown)
+  only forgets the session locally — the remote session keeps running. The next time any process uses the same
+  `--session` id, `aux4 browser` transparently reattaches to it, even from a brand new daemon that never saw
+  `open`. This is what makes it usable from environments with no persistent process at all (e.g. one command
+  invocation per serverless request): as long as the `--session` id is passed along, the browser state (open
+  tabs, cookies, current page) is exactly where the last command left it.
+- **`close --session <id>` actually ends it.** Unlike a local session, a provider-backed session is only stopped
+  for good by an explicit `close` — the daemon exiting never does.
+
+aux4/browser core has no knowledge of any specific provider or cloud vendor — it only knows how to hand a
+`wsUrl`/headers pair to Playwright's CDP attach. If you ask for a `--provider` whose plugin isn't installed,
+`open`/`close` fail with a clear error; they never silently fall back to a local browser.
+
 ### Navigation
 
 ```bash

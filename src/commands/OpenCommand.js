@@ -10,7 +10,10 @@ export async function OpenCommand(params) {
     output: params.output,
     video: params.video,
     snapshot: params.snapshot,
-    waitUntil: params.waitUntil
+    waitUntil: params.waitUntil,
+    provider: params.provider,
+    awsProfile: params.awsProfile,
+    awsRegion: params.awsRegion
   });
   if (result.snapshot) {
     console.log(JSON.stringify(result));

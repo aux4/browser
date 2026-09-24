@@ -1,13 +1,12 @@
-import { spawnSync, spawn } from 'node:child_process';
+import { execFile, spawnSync, spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { webkit, firefox, chromium } from 'playwright';
+import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
-import { BedrockAgentCoreClient, StartBrowserSessionCommand, StopBrowserSessionCommand, GetBrowserSessionCommand, ListBrowserSessionsCommand } from '@aws-sdk/client-bedrock-agentcore';
-import pkg from '@aws-sdk/credential-provider-node';
 
 class ContentExtractor {
   static async extract(page, options = {}) {
@@ -409,20 +408,114 @@ class ComponentResolver {
   }
 }
 
+const BROWSERS = { chromium, firefox, webkit };
+
+class BrowserEngine {
+  static async launch(options = {}) {
+    const { channel, browser: browserName, headed, ...launchOptions } = options;
+    const engine = BROWSERS[browserName] || chromium;
+    if (channel) launchOptions.channel = channel;
+    // headed (visible) Chrome dramatically lowers bot-detection vs headless
+    return engine.launch({ headless: !headed, ...launchOptions });
+  }
+
+  // Attach to a remote Chromium instance over CDP (e.g. an Amazon Bedrock
+  // AgentCore Browser session) instead of launching a local process. The
+  // default browser context/page belong to the remote session and are NOT
+  // owned by this process — closing this Browser handle must not tear them
+  // down (see SessionManager's "remote" mode).
+  static async connect(wsUrl, headers = {}) {
+    return chromium.connectOverCDP(wsUrl, { headers });
+  }
+}
+
+// The provider seam: aux4/browser core knows nothing about any remote
+// browser vendor (AWS Bedrock AgentCore, or any future provider). A
+// "provider" is just a name: when it's not "local", core shells out to a
+// sibling aux4 command named "<provider>-open" / "<provider>-attach" /
+// "<provider>-close" that a plugin package (e.g. aux4/browser-agentcore)
+// contributes into the SAME "browser" profile — exactly like
+// aux4/classify-jev adds "jev-ask" alongside aux4/classify's "ask".
+//
+// Contract (plugin -> core), all JSON on stdout:
+//   <provider>-open   params: whatever the user passed to `browser open`
+//                      (e.g. awsProfile, awsRegion, timeout)
+//                      returns: { token, wsUrl, headers }
+//   <provider>-attach params: { token }
+//                      returns: { wsUrl, headers }
+//   <provider>-close  params: { token }
+//                      returns: { status: "closed" }
+//
+// `token` is opaque to core — the provider decides what it needs to encode
+// in order to reattach or stop the session later (region, session id,
+// credentials profile, etc). Core only ever does
+// `chromium.connectOverCDP(wsUrl, { headers })` with what the provider hands
+// back (see BrowserEngine.connect). If the plugin isn't installed, or the
+// provider call fails for any reason, this throws loudly — core never falls
+// back to launching a local browser.
+
+const execFileAsync = promisify(execFile);
+
+function buildArgs(provider, action, params = {}) {
+  const args = ["browser", `${provider}-${action}`];
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === "") continue;
+    args.push(`--${key}`, String(value));
+  }
+  return args;
+}
+
+async function runProviderCommand(provider, action, params) {
+  const args = buildArgs(provider, action, params);
+  let stdout;
+  try {
+    ({ stdout } = await execFileAsync("aux4", args, { maxBuffer: 10 * 1024 * 1024 }));
+  } catch (e) {
+    const detail = (e.stderr || e.message || "").toString().trim();
+    throw new Error(`browser provider "${provider}" is unavailable or failed on ${action}: ${detail}`);
+  }
+  const lastLine = stdout.trim().split("\n").filter(Boolean).pop() || "";
+  try {
+    return JSON.parse(lastLine);
+  } catch {
+    throw new Error(`browser provider "${provider}" ${action} returned invalid JSON: ${stdout}`);
+  }
+}
+
+const ProviderBridge = {
+  open: (provider, params) => runProviderCommand(provider, "open", params),
+  attach: (provider, params) => runProviderCommand(provider, "attach", params),
+  close: (provider, params) => runProviderCommand(provider, "close", params)
+};
+
 const ARTIFACTS_DIR = path.join(os.homedir(), ".aux4.config", "browser", "artifacts");
+
+// Provider-backed session ids are "<provider>:<opaque token>" (e.g.
+// "agentcore:eyJ...") so a session opened with --provider agentcore is
+// self-describing: any process/daemon that later sees this id in --session
+// can tell it's not a plain local id and knows which provider to ask to
+// reattach, without any shared local state. Plain local ids never contain
+// ":" (see open()), so this split is unambiguous.
+function encodeSessionId(provider, token) {
+  return `${provider}:${token}`;
+}
+
+function decodeSessionId(id) {
+  const idx = typeof id === "string" ? id.indexOf(":") : -1;
+  if (idx === -1) return null;
+  return { provider: id.slice(0, idx), token: id.slice(idx + 1) };
+}
 
 class SessionManager {
   constructor(browser, options = {}) {
+    // The daemon's own local browser, used for provider="local" sessions
+    // (the default). Provider-backed sessions (e.g. --provider agentcore)
+    // each carry their OWN connection (session.providerBrowser) obtained via
+    // the provider seam — see open()/resolveSession() and ProviderBridge.js.
     this.browser = browser;
     this.sessions = new Map();
     this.maxSessions = options.maxSessions || 20;
     this.onEmpty = options.onEmpty || (() => {});
-    // Remote mode (e.g. attached to an AgentCore Browser session over CDP):
-    // reuse the ALREADY-EXISTING default context/page instead of creating a
-    // fresh context per aux4/browser "session" and never close that shared
-    // context — AgentCore allows exactly one automation stream per session,
-    // and the whole point is to survive detach/reattach across invocations.
-    this.remote = options.remote || false;
   }
 
   _writeArtifact(name, content, outputPath) {
@@ -451,6 +544,45 @@ class SessionManager {
     return session;
   }
 
+  // Like getSession, but for provider-backed ids (e.g. "agentcore:...") this
+  // transparently reattaches when the id isn't tracked in THIS process/daemon
+  // — the case a brand new daemon (previous one died, or a fresh cloud
+  // invocation with no shared disk) hits when it receives --session for a
+  // session that started somewhere else. It NEVER falls back to a local
+  // browser: a provider-prefixed id that fails to reattach throws loudly, and
+  // a plain local id that isn't tracked here throws "Session not found" same
+  // as before (see CBR-007/CBR-008).
+  async resolveSession(sessionId) {
+    const existing = this.sessions.get(sessionId);
+    if (existing) {
+      this.resetTimer(existing);
+      return existing;
+    }
+
+    const decoded = decodeSessionId(sessionId);
+    if (!decoded) throw new Error(`Session not found: ${sessionId}`);
+
+    const { provider, token } = decoded;
+    const { wsUrl, headers } = await ProviderBridge.attach(provider, { token });
+    if (!wsUrl) throw new Error(`browser provider "${provider}" attach did not return a wsUrl`);
+
+    const providerBrowser = await BrowserEngine.connect(wsUrl, headers || {});
+    const context = providerBrowser.contexts()[0] || await providerBrowser.newContext();
+    const page = context.pages()[0] || await context.newPage();
+
+    const timeout = this.parseTimeout("10m");
+    const session = {
+      id: sessionId, context, pages: [page], activeTab: 0,
+      timeout, createdAt: Date.now(), lastActivity: Date.now(), timer: null,
+      outputDir: "", videoMode: "off", hadError: false, snapshotMode: "off",
+      remote: true, provider, providerToken: token, providerBrowser
+    };
+    session.timer = setTimeout(() => this.close(sessionId), timeout);
+
+    this.sessions.set(sessionId, session);
+    return session;
+  }
+
   getBase(session, params = {}) {
     const page = session.pages[session.activeTab];
     // --within scopes subsequent locators INSIDE an iframe via frameLocator,
@@ -467,22 +599,22 @@ class SessionManager {
     return session.scope ? base.locator(session.scope) : base;
   }
 
-  setScope(sessionId, selector) {
-    const session = this.getSession(sessionId);
+  async setScope(sessionId, selector) {
+    const session = await this.resolveSession(sessionId);
     if (!session.scopeStack) session.scopeStack = [];
     if (session.scope) session.scopeStack.push(session.scope);
     session.scope = selector;
     return { status: "ok", scope: selector };
   }
 
-  setSnapshot(sessionId, mode) {
-    const session = this.getSession(sessionId);
+  async setSnapshot(sessionId, mode) {
+    const session = await this.resolveSession(sessionId);
     session.snapshotMode = mode || "off";
     return { status: "ok", snapshot: session.snapshotMode };
   }
 
-  clearScope(sessionId) {
-    const session = this.getSession(sessionId);
+  async clearScope(sessionId) {
+    const session = await this.resolveSession(sessionId);
     if (!session.scopeStack) session.scopeStack = [];
     session.scope = session.scopeStack.pop() || null;
     return { status: "ok" };
@@ -553,21 +685,39 @@ class SessionManager {
       throw new Error(`Max sessions (${this.maxSessions}) reached`);
     }
 
-    const id = crypto.randomUUID().slice(0, 8);
+    const provider = params.provider && params.provider !== "local" ? params.provider : "local";
     const timeout = this.parseTimeout(params.timeout || "10m");
     const outputDir = params.output || "";
     const videoMode = params.video || "off";
 
+    let id;
     let context;
     let page;
-    if (this.remote) {
+    let providerBrowser = null;
+
+    if (provider !== "local") {
+      // Provider seam: core knows nothing about the provider beyond
+      // "give me a wsUrl+headers to connectOverCDP, and an opaque token I can
+      // hand back to reattach/close later." See ProviderBridge.js.
+      const opened = await ProviderBridge.open(provider, {
+        awsProfile: params.awsProfile,
+        awsRegion: params.awsRegion,
+        timeout: params.timeout
+      });
+      if (!opened.token || !opened.wsUrl) {
+        throw new Error(`browser provider "${provider}" open did not return a token/wsUrl`);
+      }
+      providerBrowser = await BrowserEngine.connect(opened.wsUrl, opened.headers || {});
       // Reuse the remote browser's existing default context/page (created by
-      // AgentCore, not by us). Only fall back to creating one if the remote
-      // browser truly has none yet (first attach).
-      context = this.browser.contexts()[0];
-      if (!context) context = await this.browser.newContext();
+      // the provider, not by us) instead of creating a fresh one per aux4
+      // "session" — providers like AgentCore allow exactly one automation
+      // stream per session, and the whole point is to survive detach/
+      // reattach across process invocations.
+      context = providerBrowser.contexts()[0];
+      if (!context) context = await providerBrowser.newContext();
       page = context.pages()[0];
       if (!page) page = await context.newPage();
+      id = encodeSessionId(provider, opened.token);
     } else {
       const contextOptions = {
         viewport: {
@@ -582,6 +732,7 @@ class SessionManager {
       }
       context = await this.browser.newContext(contextOptions);
       page = await context.newPage();
+      id = crypto.randomUUID().slice(0, 8);
     }
 
     let response = null;
@@ -595,7 +746,10 @@ class SessionManager {
       timeout, createdAt: Date.now(), lastActivity: Date.now(),
       timer: setTimeout(() => this.close(id), timeout),
       outputDir, videoMode, hadError: false, snapshotMode,
-      remote: this.remote
+      remote: provider !== "local",
+      provider: provider !== "local" ? provider : null,
+      providerToken: provider !== "local" ? id.slice(provider.length + 1) : null,
+      providerBrowser
     };
 
     this.sessions.set(id, session);
@@ -632,19 +786,27 @@ class SessionManager {
     }
   }
 
-  async close(sessionId) {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+  // options.detach: true means "stop tracking locally only" — used when the
+  // local daemon itself is shutting down (server.stop()/closeAll()), where a
+  // provider-backed session must survive so a LATER process can reattach to
+  // the same --session id. False (the default, used by the explicit `browser
+  // close --session` command) means a real close: for provider sessions that
+  // calls the provider's own close/stop, ending the remote session for good.
+  async close(sessionId, options = {}) {
+    const detach = options.detach || false;
+    // resolveSession (not the plain map lookup) so `close --session <id>` on
+    // a provider session works even from a brand new daemon that never saw
+    // `open` for this id — it reattaches first, then closes for real.
+    const session = await this.resolveSession(sessionId);
     clearTimeout(session.timer);
 
-    // Remote (AgentCore) sessions: "close" only means "stop tracking it
-    // locally" — never close the shared context/page, that would tear down
-    // the one automation stream AgentCore allows and defeats the whole
-    // detach/reattach point of this mode.
     if (session.remote) {
+      if (!detach) {
+        await ProviderBridge.close(session.provider, { token: session.providerToken });
+      }
       this.sessions.delete(sessionId);
       if (this.sessions.size === 0) this.onEmpty();
-      return { status: "detached" };
+      return { status: detach ? "detached" : "closed" };
     }
 
     // Collect video paths before closing context
@@ -683,7 +845,7 @@ class SessionManager {
   }
 
   async visit(sessionId, url, waitUntil) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const response = await this._navigate(page, url, waitUntil);
     const info = await this._pageInfoAsync(page, response);
@@ -691,21 +853,21 @@ class SessionManager {
   }
 
   async back(sessionId) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.goBack();
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async forward(sessionId) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.goForward();
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async reload(sessionId) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.reload();
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
@@ -796,7 +958,7 @@ class SessionManager {
   }
 
   async click(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const timeout = parseInt(params.timeout) || 5000;
 
     // Click by snapshot ref index
@@ -867,7 +1029,7 @@ class SessionManager {
   }
 
   async clickSelector(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     return this._clickWithTimeout(session, base.locator(params.selector).first(), timeout, `selector="${params.selector}"`);
@@ -879,7 +1041,7 @@ class SessionManager {
   // bot-detection sees natural movement. Works across iframes because it
   // targets page-space coordinates, not a frame-scoped element.
   async mouse(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const action = params.action || "click";
     let x = parseFloat(params.x);
@@ -911,7 +1073,7 @@ class SessionManager {
   }
 
   async clickText(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const locator = base.getByText(params.text, { exact: false });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
@@ -920,7 +1082,7 @@ class SessionManager {
   }
 
   async type(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.fill(params.value);
@@ -934,7 +1096,7 @@ class SessionManager {
   }
 
   async scroll(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     if (params.to) {
       const base = this.getBase(session, params);
@@ -952,7 +1114,7 @@ class SessionManager {
   }
 
   async content(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const result = await ContentExtractor.extract(page, params);
 
@@ -989,7 +1151,7 @@ class SessionManager {
       created = true;
     }
 
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const response = await this._navigate(page, url, waitUntil);
     const info = await this._pageInfoAsync(page, response);
@@ -1020,7 +1182,7 @@ class SessionManager {
   }
 
   async screenshot(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const options = { path: params.output || "screenshot.png" };
     if (params.fullPage === "true" || params.fullPage === true) options.fullPage = true;
@@ -1029,7 +1191,7 @@ class SessionManager {
   }
 
   async wait(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const timeout = parseInt(params.timeout) || 10000;
     const selector = params.selector || "";
@@ -1083,7 +1245,7 @@ class SessionManager {
   }
 
   async expect(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
@@ -1172,7 +1334,7 @@ class SessionManager {
   }
 
   async select(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
@@ -1186,7 +1348,7 @@ class SessionManager {
   }
 
   async check(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.check({ timeout: parseInt(params.timeout) || 5000 });
@@ -1200,7 +1362,7 @@ class SessionManager {
   }
 
   async uncheck(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.uncheck({ timeout: parseInt(params.timeout) || 5000 });
@@ -1214,7 +1376,7 @@ class SessionManager {
   }
 
   async hover(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const role = params.role || "button";
     await base.getByRole(role, { name: params.name }).hover({ timeout: parseInt(params.timeout) || 5000 });
@@ -1222,7 +1384,7 @@ class SessionManager {
   }
 
   async press(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     if (params.selector) {
       const base = this.getBase(session, params);
@@ -1233,7 +1395,7 @@ class SessionManager {
   }
 
   async clear(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).clear({ timeout: parseInt(params.timeout) || 5000 });
@@ -1241,21 +1403,21 @@ class SessionManager {
   }
 
   async upload(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     await base.getByLabel(params.name).setInputFiles(params.file, { timeout: parseInt(params.timeout) || 5000 });
     return { status: "ok" };
   }
 
   async evaluate(sessionId, script) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const result = await page.evaluate(script);
     return { result };
   }
 
   async cookies(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.export && params.export !== "") {
       const cookies = await session.context.cookies();
       fs.writeFileSync(params.export, JSON.stringify(cookies, null, 2));
@@ -1271,7 +1433,7 @@ class SessionManager {
   }
 
   async savePdf(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const options = { path: params.output || "page.pdf" };
     if (params.format) options.format = params.format;
@@ -1281,7 +1443,7 @@ class SessionManager {
   }
 
   async download(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const [download] = await Promise.all([
       page.waitForEvent("download"),
@@ -1292,7 +1454,7 @@ class SessionManager {
   }
 
   async newTab(sessionId, url) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = await session.context.newPage();
     if (url && url !== "") await this._navigate(page, url);
     session.pages.push(page);
@@ -1301,7 +1463,7 @@ class SessionManager {
   }
 
   async switchTab(sessionId, tabIndex) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const idx = parseInt(tabIndex);
     if (idx < 0 || idx >= session.pages.length) throw new Error(`Tab index out of range: ${idx}`);
     session.activeTab = idx;
@@ -1310,7 +1472,7 @@ class SessionManager {
   }
 
   async closeTab(sessionId, tabIndex) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const idx = parseInt(tabIndex);
     if (idx < 0 || idx >= session.pages.length) throw new Error(`Tab index out of range: ${idx}`);
     if (session.pages.length === 1) throw new Error("Cannot close last tab. Use close session instead.");
@@ -1320,8 +1482,8 @@ class SessionManager {
     return { status: "ok", tabs: session.pages.length };
   }
 
-  listTabs(sessionId) {
-    const session = this.getSession(sessionId);
+  async listTabs(sessionId) {
+    const session = await this.resolveSession(sessionId);
     return session.pages.map((page, index) => ({
       index, url: page.url(), active: index === session.activeTab
     }));
@@ -1334,7 +1496,7 @@ class SessionManager {
   }
 
   async clickItem(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const items = this._listItems(base, params.selector);
@@ -1350,7 +1512,7 @@ class SessionManager {
   }
 
   async expectList(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 10000;
     const items = this._listItems(base, params.selector);
@@ -1372,7 +1534,7 @@ class SessionManager {
   }
 
   async getItems(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const items = this._listItems(base, params.selector);
     const count = await items.count();
@@ -1385,7 +1547,7 @@ class SessionManager {
   }
 
   async component(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const type = params.type;
@@ -1465,7 +1627,7 @@ class SessionManager {
   }
 
   async snapshot(sessionId, params = {}) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const mode = params.mode || "auto";
     const page = session.pages[session.activeTab];
     const snapshot = await SnapshotBuilder.build(page, mode);
@@ -1547,32 +1709,15 @@ class SessionManager {
     }
   }
 
+  // Called when the local daemon itself stops (SIGTERM/SIGINT, or the last
+  // session closing in non-persistent mode) — detach, don't close, so
+  // provider-backed sessions (e.g. AgentCore) stay reattachable by whatever
+  // process/daemon uses the same --session id next.
   async closeAll() {
     const ids = [...this.sessions.keys()];
     for (const id of ids) {
-      try { await this.close(id); } catch {}
+      try { await this.close(id, { detach: true }); } catch {}
     }
-  }
-}
-
-const BROWSERS = { chromium, firefox, webkit };
-
-class BrowserEngine {
-  static async launch(options = {}) {
-    const { channel, browser: browserName, headed, ...launchOptions } = options;
-    const engine = BROWSERS[browserName] || chromium;
-    if (channel) launchOptions.channel = channel;
-    // headed (visible) Chrome dramatically lowers bot-detection vs headless
-    return engine.launch({ headless: !headed, ...launchOptions });
-  }
-
-  // Attach to a remote Chromium instance over CDP (e.g. an Amazon Bedrock
-  // AgentCore Browser session) instead of launching a local process. The
-  // default browser context/page belong to the remote session and are NOT
-  // owned by this process — closing this Browser handle must not tear them
-  // down (see SessionManager's "remote" mode).
-  static async connect(wsUrl, headers = {}) {
-    return chromium.connectOverCDP(wsUrl, { headers });
   }
 }
 
@@ -1664,137 +1809,6 @@ function defaultLog(message) {
   process.stderr.write(message + "\n");
 }
 
-// Minimal SigV4 signer for the AgentCore Browser CDP WebSocket handshake (GET,
-// empty body). Avoids pulling in @aws-sdk/signature-v4 — this is a spike, and
-// the algorithm is small and stable (AWS SigV4, "bedrock-agentcore" service).
-const { defaultProvider: defaultProvider$1 } = pkg;
-
-function hmac(key, data) {
-  return crypto.createHmac("sha256", key).update(data, "utf8").digest();
-}
-
-function sha256Hex(data) {
-  return crypto.createHash("sha256").update(data, "utf8").digest("hex");
-}
-
-function amzDate() {
-  const d = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
-  return { amzDate: d, dateStamp: d.slice(0, 8) };
-}
-
-// Signs a GET request (no query string, no body) for the given https-form URL
-// and returns headers to attach to the CDP WebSocket handshake.
-async function signGetRequest({ url, service, region, profile }) {
-  const creds = await defaultProvider$1({ profile })();
-  const u = new URL(url);
-  const host = u.host;
-  const canonicalUri = u.pathname;
-  const { amzDate: xAmzDate, dateStamp } = amzDate();
-
-  const payloadHash = sha256Hex("");
-  const headers = {
-    host,
-    "x-amz-date": xAmzDate,
-    ...(creds.sessionToken ? { "x-amz-security-token": creds.sessionToken } : {})
-  };
-  const signedHeaderNames = Object.keys(headers).sort();
-  const canonicalHeaders = signedHeaderNames.map(h => `${h}:${headers[h]}\n`).join("");
-  const signedHeaders = signedHeaderNames.join(";");
-
-  const canonicalRequest = [
-    "GET",
-    canonicalUri,
-    "", // no query string
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash
-  ].join("\n");
-
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`;
-  const stringToSign = [
-    "AWS4-HMAC-SHA256",
-    xAmzDate,
-    credentialScope,
-    sha256Hex(canonicalRequest)
-  ].join("\n");
-
-  const kDate = hmac(`AWS4${creds.secretAccessKey}`, dateStamp);
-  const kRegion = hmac(kDate, region);
-  const kService = hmac(kRegion, service);
-  const kSigning = hmac(kService, "aws4_request");
-  const signature = crypto.createHmac("sha256", kSigning).update(stringToSign, "utf8").digest("hex");
-
-  const authorization = `AWS4-HMAC-SHA256 Credential=${creds.accessKeyId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
-
-  return {
-    Authorization: authorization,
-    "X-Amz-Date": xAmzDate,
-    ...(creds.sessionToken ? { "X-Amz-Security-Token": creds.sessionToken } : {})
-  };
-}
-
-// Thin wrapper around the Bedrock AgentCore Browser data-plane API (session
-// lifecycle) plus the SigV4 signer needed to attach Playwright to the
-// session's CDP automation stream. LOCAL SPIKE — package.json has no
-// dependency on @aws-sdk/* yet; these are dev-only installs under
-// package/lib/node_modules for this spike (see CBR-002/003).
-const { defaultProvider } = pkg;
-
-const DEFAULT_BROWSER_ID = "aws.browser.v1";
-const SERVICE = "bedrock-agentcore";
-
-function wsUrl({ region, browserIdentifier, sessionId }) {
-  return `wss://bedrock-agentcore.${region}.amazonaws.com/browser-streams/${browserIdentifier}/sessions/${sessionId}/automation`;
-}
-
-class AgentCoreClient {
-  constructor({ region, profile } = {}) {
-    this.region = region || "us-east-1";
-    this.profile = profile || "";
-    this.client = new BedrockAgentCoreClient({
-      region: this.region,
-      ...(this.profile ? { credentials: defaultProvider({ profile: this.profile }) } : {})
-    });
-  }
-
-  async startSession({ name, timeoutSeconds, browserIdentifier = DEFAULT_BROWSER_ID }) {
-    const res = await this.client.send(new StartBrowserSessionCommand({
-      browserIdentifier,
-      name: name || "aux4-browser-agentcore",
-      sessionTimeoutSeconds: timeoutSeconds ? parseInt(timeoutSeconds) : undefined
-    }));
-    return {
-      sessionId: res.sessionId,
-      browserIdentifier,
-      region: this.region,
-      createdAt: res.createdAt,
-      wsUrl: wsUrl({ region: this.region, browserIdentifier, sessionId: res.sessionId })
-    };
-  }
-
-  async stopSession({ sessionId, browserIdentifier = DEFAULT_BROWSER_ID }) {
-    await this.client.send(new StopBrowserSessionCommand({ browserIdentifier, sessionId }));
-    return { status: "stopped", sessionId };
-  }
-
-  async getSession({ sessionId, browserIdentifier = DEFAULT_BROWSER_ID }) {
-    const res = await this.client.send(new GetBrowserSessionCommand({ browserIdentifier, sessionId }));
-    return res;
-  }
-
-  async listSessions({ browserIdentifier = DEFAULT_BROWSER_ID } = {}) {
-    const res = await this.client.send(new ListBrowserSessionsCommand({ browserIdentifier }));
-    return res.items || [];
-  }
-
-  // Signed headers to hand to Playwright's connectOverCDP({ headers }) for the
-  // automation stream WebSocket handshake (GET, no body).
-  async signedConnectHeaders({ sessionId, browserIdentifier = DEFAULT_BROWSER_ID }) {
-    const url = wsUrl({ region: this.region, browserIdentifier, sessionId });
-    return signGetRequest({ url, service: SERVICE, region: this.region, profile: this.profile || undefined });
-  }
-}
-
 const SOCKET_DIR$1 = path.join(os.homedir(), ".aux4.config", "browser");
 const SOCKET_PATH$2 = path.join(SOCKET_DIR$1, "browser.sock");
 const PID_PATH$1 = path.join(SOCKET_DIR$1, "browser.pid");
@@ -1806,8 +1820,6 @@ class DaemonServer {
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
     this.headed = options.headed || false;
-    // Remote (AgentCore) attach mode: { sessionId, region, profile, browserIdentifier }
-    this.agentcore = options.agentcore || null;
     this.sessionManager = null;
     this.server = null;
     this.browser = null;
@@ -1817,34 +1829,21 @@ class DaemonServer {
     fs.mkdirSync(SOCKET_DIR$1, { recursive: true });
     if (fs.existsSync(SOCKET_PATH$2)) fs.unlinkSync(SOCKET_PATH$2);
 
-    if (this.agentcore) {
-      const client = new AgentCoreClient({ region: this.agentcore.region, profile: this.agentcore.profile });
-      const headers = await client.signedConnectHeaders({
-        sessionId: this.agentcore.sessionId,
-        browserIdentifier: this.agentcore.browserIdentifier
-      });
-      const url = wsUrl({
-        region: this.agentcore.region,
-        browserIdentifier: this.agentcore.browserIdentifier,
-        sessionId: this.agentcore.sessionId
-      });
-      this.browser = await BrowserEngine.connect(url, headers);
-    } else {
-      // Defensive self-heal for when the daemon is launched directly (not via the
-      // StartCommand parent, which already provisions the browser). No-op/quiet
-      // when the browser is already present.
-      ensureBrowserInstalled(this.browserName || "chromium");
+    // The daemon always launches a LOCAL browser for provider="local"
+    // sessions (the default, and the only kind before CBR-008). Any
+    // provider-backed session (--provider agentcore, ...) gets its own
+    // separate connection via the provider seam in SessionManager.open()/
+    // resolveSession() — the daemon itself is never "attached" as a whole.
+    ensureBrowserInstalled(this.browserName || "chromium");
 
-      const launchOptions = {};
-      if (this.channel) launchOptions.channel = this.channel;
-      if (this.browserName) launchOptions.browser = this.browserName;
-      if (this.headed) launchOptions.headed = true;
-      this.browser = await BrowserEngine.launch(launchOptions);
-    }
+    const launchOptions = {};
+    if (this.channel) launchOptions.channel = this.channel;
+    if (this.browserName) launchOptions.browser = this.browserName;
+    if (this.headed) launchOptions.headed = true;
+    this.browser = await BrowserEngine.launch(launchOptions);
 
     this.sessionManager = new SessionManager(this.browser, {
       maxSessions: this.maxSessions,
-      remote: !!this.agentcore,
       onEmpty: () => {
         if (!this.persistent) this.stop();
       }
@@ -1959,14 +1958,17 @@ class DaemonServer {
   }
 
   async stop() {
+    // closeAll() detaches (not closes) any provider-backed sessions — it
+    // only forgets them locally. We deliberately never call .close() on a
+    // session's providerBrowser (the connectOverCDP handle): even though
+    // Playwright documents that as "disconnect only, not terminate", we
+    // avoid the CDP round-trip entirely and just let the process exit,
+    // dropping the local WebSocket. That's what "detach must not end the
+    // provider session" means operationally (see CBR-007/CBR-008).
     if (this.sessionManager) await this.sessionManager.closeAll();
-    // In agentcore mode, DON'T call browser.close() — even though
-    // Playwright's connectOverCDP-obtained Browser is documented to only
-    // disconnect (not terminate) the remote browser, we avoid the CDP
-    // round-trip entirely for the detach case: just drop the local
-    // WebSocket by letting the process exit. This is what "detach must not
-    // end the AgentCore session" means operationally.
-    if (this.browser && !this.agentcore) await this.browser.close();
+    // this.browser is always the daemon's own LOCAL browser now (see
+    // start()) — always safe/correct to close it on shutdown.
+    if (this.browser) await this.browser.close();
     if (this.server) this.server.close();
     try { fs.unlinkSync(SOCKET_PATH$2); } catch {}
     try { fs.unlinkSync(PID_PATH$1); } catch {}
@@ -2008,9 +2010,6 @@ function waitForSocket(maxAttempts = 30) {
 }
 
 async function StartCommand(params) {
-  const agentcoreSessionId = params.agentcoreSessionId || "";
-  const isAgentCore = agentcoreSessionId !== "";
-
   // If running as the forked daemon child, start server directly
   if (process.env.AUX4_BROWSER_DAEMON === "1") {
     const server = new DaemonServer({
@@ -2018,13 +2017,7 @@ async function StartCommand(params) {
       persistent: params.persistent === "true" || params.persistent === true,
       channel: params.channel || "",
       browser: params.browser || "",
-      headed: params.headed === "true" || params.headed === true,
-      agentcore: isAgentCore ? {
-        sessionId: agentcoreSessionId,
-        region: params.awsRegion || "us-east-1",
-        profile: params.awsProfile || "",
-        browserIdentifier: params.agentcoreBrowserId || "aws.browser.v1"
-      } : null
+      headed: params.headed === "true" || params.headed === true
     });
     await server.start();
     return;
@@ -2039,8 +2032,7 @@ async function StartCommand(params) {
   // Self-provision the browser binary in the foreground (before forking the
   // detached daemon) so the "installing…" notice is visible to the user and the
   // daemon child never blocks on a download while waitForSocket() is ticking.
-  // Not needed in agentcore mode — the browser is remote, nothing to install.
-  if (!isAgentCore) ensureBrowserInstalled(params.browser || "chromium");
+  ensureBrowserInstalled(params.browser || "chromium");
 
   // Fork the daemon to the background
   const child = spawn(process.execPath, process.argv.slice(1), {
@@ -2144,7 +2136,10 @@ async function OpenCommand(params) {
     output: params.output,
     video: params.video,
     snapshot: params.snapshot,
-    waitUntil: params.waitUntil
+    waitUntil: params.waitUntil,
+    provider: params.provider,
+    awsProfile: params.awsProfile,
+    awsRegion: params.awsRegion
   });
   if (result.snapshot) {
     console.log(JSON.stringify(result));
@@ -2583,44 +2578,14 @@ async function ReadCommand(params) {
   console.log(JSON.stringify(result));
 }
 
-function client(params) {
-  return new AgentCoreClient({ region: params.awsRegion || "us-east-1", profile: params.awsProfile || "" });
-}
-
-async function AgentCoreStartCommand(params) {
-  const result = await client(params).startSession({
-    name: params.name,
-    timeoutSeconds: params.timeoutSeconds,
-    browserIdentifier: params.agentcoreBrowserId
-  });
-  console.log(JSON.stringify(result));
-}
-
-async function AgentCoreStopCommand(params) {
-  if (!params.sessionId) throw new Error("agentcore-stop: --sessionId is required");
-  const result = await client(params).stopSession({
-    sessionId: params.sessionId,
-    browserIdentifier: params.agentcoreBrowserId
-  });
-  console.log(JSON.stringify(result));
-}
-
-async function AgentCoreListCommand(params) {
-  const result = await client(params).listSessions({ browserIdentifier: params.agentcoreBrowserId });
-  console.log(JSON.stringify(result));
-}
-
 const args = process.argv.slice(2);
 const action = args[0];
 const values = args.slice(1);
 
 const commands = {
-  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed", "agentcoreSessionId", "awsRegion", "awsProfile", "agentcoreBrowserId"] },
-  "agentcore-start": { handler: AgentCoreStartCommand, args: ["name", "timeoutSeconds", "awsRegion", "awsProfile", "agentcoreBrowserId"] },
-  "agentcore-stop":  { handler: AgentCoreStopCommand,  args: ["sessionId", "awsRegion", "awsProfile", "agentcoreBrowserId"] },
-  "agentcore-list":  { handler: AgentCoreListCommand,  args: ["awsRegion", "awsProfile", "agentcoreBrowserId"] },
+  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed"] },
   stop:        { handler: StopCommand,     args: [] },
-  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil"] },
+  open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil", "provider", "awsProfile", "awsRegion"] },
   close:       { handler: CloseCommand,    args: ["session"] },
   list:        { handler: ListCommand,     args: [] },
   visit:       { handler: VisitCommand,    args: ["session", "url", "waitUntil"] },

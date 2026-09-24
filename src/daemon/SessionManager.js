@@ -5,21 +5,37 @@ import os from "node:os";
 import { ContentExtractor } from "../lib/ContentExtractor.js";
 import { SnapshotBuilder } from "../lib/SnapshotBuilder.js";
 import { ComponentResolver } from "../lib/ComponentResolver.js";
+import { BrowserEngine } from "./BrowserEngine.js";
+import { ProviderBridge } from "./ProviderBridge.js";
 
 const ARTIFACTS_DIR = path.join(os.homedir(), ".aux4.config", "browser", "artifacts");
 
+// Provider-backed session ids are "<provider>:<opaque token>" (e.g.
+// "agentcore:eyJ...") so a session opened with --provider agentcore is
+// self-describing: any process/daemon that later sees this id in --session
+// can tell it's not a plain local id and knows which provider to ask to
+// reattach, without any shared local state. Plain local ids never contain
+// ":" (see open()), so this split is unambiguous.
+function encodeSessionId(provider, token) {
+  return `${provider}:${token}`;
+}
+
+function decodeSessionId(id) {
+  const idx = typeof id === "string" ? id.indexOf(":") : -1;
+  if (idx === -1) return null;
+  return { provider: id.slice(0, idx), token: id.slice(idx + 1) };
+}
+
 export class SessionManager {
   constructor(browser, options = {}) {
+    // The daemon's own local browser, used for provider="local" sessions
+    // (the default). Provider-backed sessions (e.g. --provider agentcore)
+    // each carry their OWN connection (session.providerBrowser) obtained via
+    // the provider seam — see open()/resolveSession() and ProviderBridge.js.
     this.browser = browser;
     this.sessions = new Map();
     this.maxSessions = options.maxSessions || 20;
     this.onEmpty = options.onEmpty || (() => {});
-    // Remote mode (e.g. attached to an AgentCore Browser session over CDP):
-    // reuse the ALREADY-EXISTING default context/page instead of creating a
-    // fresh context per aux4/browser "session" and never close that shared
-    // context — AgentCore allows exactly one automation stream per session,
-    // and the whole point is to survive detach/reattach across invocations.
-    this.remote = options.remote || false;
   }
 
   _writeArtifact(name, content, outputPath) {
@@ -48,6 +64,45 @@ export class SessionManager {
     return session;
   }
 
+  // Like getSession, but for provider-backed ids (e.g. "agentcore:...") this
+  // transparently reattaches when the id isn't tracked in THIS process/daemon
+  // — the case a brand new daemon (previous one died, or a fresh cloud
+  // invocation with no shared disk) hits when it receives --session for a
+  // session that started somewhere else. It NEVER falls back to a local
+  // browser: a provider-prefixed id that fails to reattach throws loudly, and
+  // a plain local id that isn't tracked here throws "Session not found" same
+  // as before (see CBR-007/CBR-008).
+  async resolveSession(sessionId) {
+    const existing = this.sessions.get(sessionId);
+    if (existing) {
+      this.resetTimer(existing);
+      return existing;
+    }
+
+    const decoded = decodeSessionId(sessionId);
+    if (!decoded) throw new Error(`Session not found: ${sessionId}`);
+
+    const { provider, token } = decoded;
+    const { wsUrl, headers } = await ProviderBridge.attach(provider, { token });
+    if (!wsUrl) throw new Error(`browser provider "${provider}" attach did not return a wsUrl`);
+
+    const providerBrowser = await BrowserEngine.connect(wsUrl, headers || {});
+    const context = providerBrowser.contexts()[0] || await providerBrowser.newContext();
+    const page = context.pages()[0] || await context.newPage();
+
+    const timeout = this.parseTimeout("10m");
+    const session = {
+      id: sessionId, context, pages: [page], activeTab: 0,
+      timeout, createdAt: Date.now(), lastActivity: Date.now(), timer: null,
+      outputDir: "", videoMode: "off", hadError: false, snapshotMode: "off",
+      remote: true, provider, providerToken: token, providerBrowser
+    };
+    session.timer = setTimeout(() => this.close(sessionId), timeout);
+
+    this.sessions.set(sessionId, session);
+    return session;
+  }
+
   getBase(session, params = {}) {
     const page = session.pages[session.activeTab];
     // --within scopes subsequent locators INSIDE an iframe via frameLocator,
@@ -64,22 +119,22 @@ export class SessionManager {
     return session.scope ? base.locator(session.scope) : base;
   }
 
-  setScope(sessionId, selector) {
-    const session = this.getSession(sessionId);
+  async setScope(sessionId, selector) {
+    const session = await this.resolveSession(sessionId);
     if (!session.scopeStack) session.scopeStack = [];
     if (session.scope) session.scopeStack.push(session.scope);
     session.scope = selector;
     return { status: "ok", scope: selector };
   }
 
-  setSnapshot(sessionId, mode) {
-    const session = this.getSession(sessionId);
+  async setSnapshot(sessionId, mode) {
+    const session = await this.resolveSession(sessionId);
     session.snapshotMode = mode || "off";
     return { status: "ok", snapshot: session.snapshotMode };
   }
 
-  clearScope(sessionId) {
-    const session = this.getSession(sessionId);
+  async clearScope(sessionId) {
+    const session = await this.resolveSession(sessionId);
     if (!session.scopeStack) session.scopeStack = [];
     session.scope = session.scopeStack.pop() || null;
     return { status: "ok" };
@@ -150,21 +205,39 @@ export class SessionManager {
       throw new Error(`Max sessions (${this.maxSessions}) reached`);
     }
 
-    const id = crypto.randomUUID().slice(0, 8);
+    const provider = params.provider && params.provider !== "local" ? params.provider : "local";
     const timeout = this.parseTimeout(params.timeout || "10m");
     const outputDir = params.output || "";
     const videoMode = params.video || "off";
 
+    let id;
     let context;
     let page;
-    if (this.remote) {
+    let providerBrowser = null;
+
+    if (provider !== "local") {
+      // Provider seam: core knows nothing about the provider beyond
+      // "give me a wsUrl+headers to connectOverCDP, and an opaque token I can
+      // hand back to reattach/close later." See ProviderBridge.js.
+      const opened = await ProviderBridge.open(provider, {
+        awsProfile: params.awsProfile,
+        awsRegion: params.awsRegion,
+        timeout: params.timeout
+      });
+      if (!opened.token || !opened.wsUrl) {
+        throw new Error(`browser provider "${provider}" open did not return a token/wsUrl`);
+      }
+      providerBrowser = await BrowserEngine.connect(opened.wsUrl, opened.headers || {});
       // Reuse the remote browser's existing default context/page (created by
-      // AgentCore, not by us). Only fall back to creating one if the remote
-      // browser truly has none yet (first attach).
-      context = this.browser.contexts()[0];
-      if (!context) context = await this.browser.newContext();
+      // the provider, not by us) instead of creating a fresh one per aux4
+      // "session" — providers like AgentCore allow exactly one automation
+      // stream per session, and the whole point is to survive detach/
+      // reattach across process invocations.
+      context = providerBrowser.contexts()[0];
+      if (!context) context = await providerBrowser.newContext();
       page = context.pages()[0];
       if (!page) page = await context.newPage();
+      id = encodeSessionId(provider, opened.token);
     } else {
       const contextOptions = {
         viewport: {
@@ -179,6 +252,7 @@ export class SessionManager {
       }
       context = await this.browser.newContext(contextOptions);
       page = await context.newPage();
+      id = crypto.randomUUID().slice(0, 8);
     }
 
     let response = null;
@@ -192,7 +266,10 @@ export class SessionManager {
       timeout, createdAt: Date.now(), lastActivity: Date.now(),
       timer: setTimeout(() => this.close(id), timeout),
       outputDir, videoMode, hadError: false, snapshotMode,
-      remote: this.remote
+      remote: provider !== "local",
+      provider: provider !== "local" ? provider : null,
+      providerToken: provider !== "local" ? id.slice(provider.length + 1) : null,
+      providerBrowser
     };
 
     this.sessions.set(id, session);
@@ -229,19 +306,27 @@ export class SessionManager {
     }
   }
 
-  async close(sessionId) {
-    const session = this.sessions.get(sessionId);
-    if (!session) throw new Error(`Session not found: ${sessionId}`);
+  // options.detach: true means "stop tracking locally only" — used when the
+  // local daemon itself is shutting down (server.stop()/closeAll()), where a
+  // provider-backed session must survive so a LATER process can reattach to
+  // the same --session id. False (the default, used by the explicit `browser
+  // close --session` command) means a real close: for provider sessions that
+  // calls the provider's own close/stop, ending the remote session for good.
+  async close(sessionId, options = {}) {
+    const detach = options.detach || false;
+    // resolveSession (not the plain map lookup) so `close --session <id>` on
+    // a provider session works even from a brand new daemon that never saw
+    // `open` for this id — it reattaches first, then closes for real.
+    const session = await this.resolveSession(sessionId);
     clearTimeout(session.timer);
 
-    // Remote (AgentCore) sessions: "close" only means "stop tracking it
-    // locally" — never close the shared context/page, that would tear down
-    // the one automation stream AgentCore allows and defeats the whole
-    // detach/reattach point of this mode.
     if (session.remote) {
+      if (!detach) {
+        await ProviderBridge.close(session.provider, { token: session.providerToken });
+      }
       this.sessions.delete(sessionId);
       if (this.sessions.size === 0) this.onEmpty();
-      return { status: "detached" };
+      return { status: detach ? "detached" : "closed" };
     }
 
     // Collect video paths before closing context
@@ -280,7 +365,7 @@ export class SessionManager {
   }
 
   async visit(sessionId, url, waitUntil) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const response = await this._navigate(page, url, waitUntil);
     const info = await this._pageInfoAsync(page, response);
@@ -288,21 +373,21 @@ export class SessionManager {
   }
 
   async back(sessionId) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.goBack();
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async forward(sessionId) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.goForward();
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
   async reload(sessionId) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     await page.reload();
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
@@ -393,7 +478,7 @@ export class SessionManager {
   }
 
   async click(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const timeout = parseInt(params.timeout) || 5000;
 
     // Click by snapshot ref index
@@ -464,7 +549,7 @@ export class SessionManager {
   }
 
   async clickSelector(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     return this._clickWithTimeout(session, base.locator(params.selector).first(), timeout, `selector="${params.selector}"`);
@@ -476,7 +561,7 @@ export class SessionManager {
   // bot-detection sees natural movement. Works across iframes because it
   // targets page-space coordinates, not a frame-scoped element.
   async mouse(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const action = params.action || "click";
     let x = parseFloat(params.x);
@@ -508,7 +593,7 @@ export class SessionManager {
   }
 
   async clickText(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const locator = base.getByText(params.text, { exact: false });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
@@ -517,7 +602,7 @@ export class SessionManager {
   }
 
   async type(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.fill(params.value);
@@ -531,7 +616,7 @@ export class SessionManager {
   }
 
   async scroll(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     if (params.to) {
       const base = this.getBase(session, params);
@@ -549,7 +634,7 @@ export class SessionManager {
   }
 
   async content(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const result = await ContentExtractor.extract(page, params);
 
@@ -586,7 +671,7 @@ export class SessionManager {
       created = true;
     }
 
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const response = await this._navigate(page, url, waitUntil);
     const info = await this._pageInfoAsync(page, response);
@@ -617,7 +702,7 @@ export class SessionManager {
   }
 
   async screenshot(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const options = { path: params.output || "screenshot.png" };
     if (params.fullPage === "true" || params.fullPage === true) options.fullPage = true;
@@ -626,7 +711,7 @@ export class SessionManager {
   }
 
   async wait(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const timeout = parseInt(params.timeout) || 10000;
     const selector = params.selector || "";
@@ -680,7 +765,7 @@ export class SessionManager {
   }
 
   async expect(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
@@ -769,7 +854,7 @@ export class SessionManager {
   }
 
   async select(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
@@ -783,7 +868,7 @@ export class SessionManager {
   }
 
   async check(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.check({ timeout: parseInt(params.timeout) || 5000 });
@@ -797,7 +882,7 @@ export class SessionManager {
   }
 
   async uncheck(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.uncheck({ timeout: parseInt(params.timeout) || 5000 });
@@ -811,7 +896,7 @@ export class SessionManager {
   }
 
   async hover(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const role = params.role || "button";
     await base.getByRole(role, { name: params.name }).hover({ timeout: parseInt(params.timeout) || 5000 });
@@ -819,7 +904,7 @@ export class SessionManager {
   }
 
   async press(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     if (params.selector) {
       const base = this.getBase(session, params);
@@ -830,7 +915,7 @@ export class SessionManager {
   }
 
   async clear(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).clear({ timeout: parseInt(params.timeout) || 5000 });
@@ -838,21 +923,21 @@ export class SessionManager {
   }
 
   async upload(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     await base.getByLabel(params.name).setInputFiles(params.file, { timeout: parseInt(params.timeout) || 5000 });
     return { status: "ok" };
   }
 
   async evaluate(sessionId, script) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const result = await page.evaluate(script);
     return { result };
   }
 
   async cookies(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     if (params.export && params.export !== "") {
       const cookies = await session.context.cookies();
       fs.writeFileSync(params.export, JSON.stringify(cookies, null, 2));
@@ -868,7 +953,7 @@ export class SessionManager {
   }
 
   async savePdf(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const options = { path: params.output || "page.pdf" };
     if (params.format) options.format = params.format;
@@ -878,7 +963,7 @@ export class SessionManager {
   }
 
   async download(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const [download] = await Promise.all([
       page.waitForEvent("download"),
@@ -889,7 +974,7 @@ export class SessionManager {
   }
 
   async newTab(sessionId, url) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const page = await session.context.newPage();
     if (url && url !== "") await this._navigate(page, url);
     session.pages.push(page);
@@ -898,7 +983,7 @@ export class SessionManager {
   }
 
   async switchTab(sessionId, tabIndex) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const idx = parseInt(tabIndex);
     if (idx < 0 || idx >= session.pages.length) throw new Error(`Tab index out of range: ${idx}`);
     session.activeTab = idx;
@@ -907,7 +992,7 @@ export class SessionManager {
   }
 
   async closeTab(sessionId, tabIndex) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const idx = parseInt(tabIndex);
     if (idx < 0 || idx >= session.pages.length) throw new Error(`Tab index out of range: ${idx}`);
     if (session.pages.length === 1) throw new Error("Cannot close last tab. Use close session instead.");
@@ -917,8 +1002,8 @@ export class SessionManager {
     return { status: "ok", tabs: session.pages.length };
   }
 
-  listTabs(sessionId) {
-    const session = this.getSession(sessionId);
+  async listTabs(sessionId) {
+    const session = await this.resolveSession(sessionId);
     return session.pages.map((page, index) => ({
       index, url: page.url(), active: index === session.activeTab
     }));
@@ -931,7 +1016,7 @@ export class SessionManager {
   }
 
   async clickItem(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const items = this._listItems(base, params.selector);
@@ -947,7 +1032,7 @@ export class SessionManager {
   }
 
   async expectList(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 10000;
     const items = this._listItems(base, params.selector);
@@ -969,7 +1054,7 @@ export class SessionManager {
   }
 
   async getItems(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const items = this._listItems(base, params.selector);
     const count = await items.count();
@@ -982,7 +1067,7 @@ export class SessionManager {
   }
 
   async component(sessionId, params) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const type = params.type;
@@ -1062,7 +1147,7 @@ export class SessionManager {
   }
 
   async snapshot(sessionId, params = {}) {
-    const session = this.getSession(sessionId);
+    const session = await this.resolveSession(sessionId);
     const mode = params.mode || "auto";
     const page = session.pages[session.activeTab];
     const snapshot = await SnapshotBuilder.build(page, mode);
@@ -1144,10 +1229,14 @@ export class SessionManager {
     }
   }
 
+  // Called when the local daemon itself stops (SIGTERM/SIGINT, or the last
+  // session closing in non-persistent mode) — detach, don't close, so
+  // provider-backed sessions (e.g. AgentCore) stay reattachable by whatever
+  // process/daemon uses the same --session id next.
   async closeAll() {
     const ids = [...this.sessions.keys()];
     for (const id of ids) {
-      try { await this.close(id); } catch {}
+      try { await this.close(id, { detach: true }); } catch {}
     }
   }
 }
