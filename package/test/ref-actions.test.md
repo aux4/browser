@@ -127,3 +127,70 @@ ok
 false
 ```
 </content>
+
+### should select an option in a custom (non-native) combobox addressed by --ref
+
+```timeout
+30000
+```
+
+```file:custom-combobox.html
+<html>
+<body>
+  <div id="state" role="combobox" tabindex="0" aria-expanded="false" onclick="document.getElementById('list').style.display='block'">Select State</div>
+  <div id="list" role="listbox" style="display:none">
+    <div role="option" onclick="pick(this)">Illinois</div>
+    <div role="option" onclick="pick(this)">California</div>
+  </div>
+  <script>
+    function pick(o) {
+      document.getElementById('state').textContent = o.textContent;
+      document.getElementById('list').style.display = 'none';
+    }
+  </script>
+</body>
+</html>
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/custom-combobox.html" 2>/dev/null)
+SNAP=$(aux4 browser snapshot --session $SESSION 2>/dev/null)
+REF=$(echo "$SNAP" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).snapshot.elements.find(e => e.role === 'combobox').ref")
+aux4 browser select --session $SESSION --ref $REF --value "california" 2>/dev/null | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).status"
+aux4 browser eval --session $SESSION --script "document.getElementById('state').textContent" 2>/dev/null
+aux4 browser close --session $SESSION >/dev/null 2>&1
+```
+
+```expect
+ok
+California
+```
+
+### should fail clearly when a custom combobox has no matching option
+
+```timeout
+30000
+```
+
+```file:custom-combobox.html
+<html>
+<body>
+  <div id="state" role="combobox" tabindex="0" onclick="document.getElementById('list').style.display='block'">Select State</div>
+  <div id="list" role="listbox" style="display:none">
+    <div role="option">Illinois</div>
+  </div>
+</body>
+</html>
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/custom-combobox.html" 2>/dev/null)
+SNAP=$(aux4 browser snapshot --session $SESSION 2>/dev/null)
+REF=$(echo "$SNAP" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).snapshot.elements.find(e => e.role === 'combobox').ref")
+aux4 browser select --session $SESSION --ref $REF --value "Texas" 2>&1 | grep -o 'no option matching' 
+aux4 browser close --session $SESSION >/dev/null 2>&1
+```
+
+```expect
+no option matching
+```

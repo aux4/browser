@@ -177,6 +177,8 @@ aux4 browser clear --session <id> --name "Search"
 aux4 browser upload --session <id> --name "Avatar" --file photo.jpg
 ```
 
+`select` works on native `<select>` elements and on custom comboboxes (`role="combobox"` widgets): a custom one is opened with a click and the visible `role="option"` whose text matches `--value` is clicked (exact, then case-insensitive, then contains).
+
 #### Real mouse movement
 
 `mouse` drives the cursor at viewport coordinates with a human-like multi-step trajectory (rather than teleporting to an element). Useful for sites that score pointer behavior, and it clicks whatever is at the coordinate (iframe content included).
@@ -240,6 +242,8 @@ aux4 browser content --session <id> --selector ".main" --format text
 # Take a screenshot
 aux4 browser screenshot --session <id> --output page.png --fullPage true
 ```
+
+`content` and `read` in `markdown`/`text` format return readable text only: scripts, styles, JSON-LD and embedded JSON data blobs are dropped, and on a page with a main landmark (`<main>` / `role="main"`) the main content comes first, followed by `---` and the rest of the page. `--format html` returns the raw HTML.
 
 ### Accessibility Snapshots
 

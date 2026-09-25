@@ -4,6 +4,14 @@ One-shot page read: opens a session (or reuses an existing one), navigates to th
 
 When no `--session` is provided, creates a temporary session that is automatically closed after the read. When a session is provided, it is reused and kept open.
 
+The `markdown` and `text` formats return only readable page text:
+
+- **No code or data** — `<script>`, `<style>`, `<noscript>`, `<template>`, `<iframe>` and `<svg>` content, JSON-LD and embedded JSON data blobs are dropped (the same skip rules as `browser blocks`)
+- **Main content first** — when the page has a main landmark (`<main>` or `role="main"`), its content comes first, then a `---` line, then the rest of the page (header, navigation, footer)
+- **Links kept** — links that span several lines still come out as `[label](href)`
+
+The `html` format returns the raw HTML unchanged.
+
 #### Usage
 
 ```bash

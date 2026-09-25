@@ -910,16 +910,75 @@ export class SessionManager {
 
   async select(sessionId, params) {
     const session = await this.resolveSession(sessionId);
+    const timeout = parseInt(params.timeout) || 5000;
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
-      await element.selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
-      await element.dispose();
+      try {
+        await this._selectOn(session, element, params.value, timeout);
+      } finally {
+        await element.dispose();
+      }
       return this._attachSnapshot(session, { status: "ok" });
     }
     const base = this.getBase(session, params);
     const role = params.role || "combobox";
-    await base.getByRole(role, { name: params.name }).selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
+    const locator = base.getByRole(role, { name: params.name }).first();
+    const element = await locator.elementHandle({ timeout });
+    try {
+      await this._selectOn(session, element, params.value, timeout);
+    } finally {
+      await element.dispose();
+    }
     return this._attachSnapshot(session, { status: "ok" });
+  }
+
+  // A native <select> takes selectOption. A custom combobox (a div/mat-select/
+  // listbox button with role=combobox) cannot: open it with a click, then click
+  // the visible role=option whose text matches the value (exact, then
+  // case-insensitive contains).
+  async _selectOn(session, element, value, timeout) {
+    const tag = await element.evaluate(el => el.tagName.toLowerCase());
+    if (tag === "select") {
+      await element.selectOption(value, { timeout });
+      return;
+    }
+    const page = session.pages[session.activeTab];
+    await element.click({ timeout });
+    const wanted = String(value == null ? "" : value).trim();
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      const clicked = await page.evaluate((wanted) => {
+        const norm = (s) => String(s || "").replace(/\s+/g, " ").trim().toLowerCase();
+        const visible = (el) => {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return false;
+          const s = window.getComputedStyle(el);
+          return s.visibility !== "hidden" && s.display !== "none";
+        };
+        const options = Array.from(document.querySelectorAll("[role='option']")).filter(visible);
+        const w = norm(wanted);
+        const pick = options.find(o => norm(o.textContent) === w)
+          || options.find(o => norm(o.getAttribute("aria-label")) === w)
+          || options.find(o => w && norm(o.textContent).includes(w));
+        if (!pick) return options.length ? "none" : "";
+        pick.scrollIntoView({ block: "center" });
+        pick.setAttribute("data-aux4-select-pick", "1");
+        return "ok";
+      }, wanted);
+      if (clicked === "ok") {
+        const pick = page.locator("[data-aux4-select-pick='1']").first();
+        await pick.click({ timeout });
+        await page.evaluate(() => document.querySelectorAll("[data-aux4-select-pick]").forEach(el => el.removeAttribute("data-aux4-select-pick")));
+        return;
+      }
+      if (clicked === "none") {
+        await page.keyboard.press("Escape").catch(() => {});
+        throw new Error(`select: no option matching "${wanted}"`);
+      }
+      await page.waitForTimeout(150);
+    }
+    await page.keyboard.press("Escape").catch(() => {});
+    throw new Error(`select: the combobox did not show any options for "${wanted}"`);
   }
 
   async check(sessionId, params) {
