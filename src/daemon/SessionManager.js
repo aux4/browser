@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { ContentExtractor } from "../lib/ContentExtractor.js";
 import { SnapshotBuilder } from "../lib/SnapshotBuilder.js";
+import { BlocksBuilder } from "../lib/BlocksBuilder.js";
 import { ComponentResolver } from "../lib/ComponentResolver.js";
 import { BrowserEngine } from "./BrowserEngine.js";
 import { ProviderBridge } from "./ProviderBridge.js";
@@ -1295,6 +1296,25 @@ export class SessionManager {
       return { status: "ok", text: SnapshotBuilder.render(snapshot) };
     }
     return { status: "ok", snapshot };
+  }
+
+  // CBR-042: deterministic DOM-walk content blocks — see BlocksBuilder.js.
+  // Works against an existing local OR remote (cdp/agentcore) session;
+  // --url optionally navigates first, otherwise blocks the current page.
+  async blocks(sessionId, params = {}) {
+    const session = await this.resolveSession(sessionId);
+    const page = session.pages[session.activeTab];
+
+    if (params.url) {
+      await this._navigate(page, params.url, params.waitUntil || "load");
+    }
+
+    const result = await BlocksBuilder.build(page, {
+      maxBlockChars: params.maxBlockChars,
+      includeNav: params.includeNav
+    });
+
+    return { status: "ok", ...result };
   }
 
   async execute(sessionId, instructions) {

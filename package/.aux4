@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.25",
+  "version": "1.0.26",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -1401,6 +1401,42 @@
                 "name": "output",
                 "text": "Write snapshot to file instead of stdout, returns path + summary",
                 "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "blocks",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs blocks values(session,url,waitUntil,maxBlockChars,includeNav)"
+          ],
+          "help": {
+            "text": "Split the current page into content blocks (headings, paragraphs, list items, article/figure cards, table rows) via a deterministic DOM walk — no AI involved",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "url",
+                "text": "Navigate to this URL first; omit to block the current page",
+                "default": ""
+              },
+              {
+                "name": "waitUntil",
+                "text": "Navigation wait strategy when --url is given: domcontentloaded, load, networkidle, settle",
+                "default": "load"
+              },
+              {
+                "name": "maxBlockChars",
+                "text": "Cap each block's text at this many characters",
+                "default": "1500"
+              },
+              {
+                "name": "includeNav",
+                "text": "Include nav/footer/aside/header landmarks (skipped by default)",
+                "default": "false"
               }
             ]
           }

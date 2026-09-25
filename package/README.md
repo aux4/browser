@@ -273,6 +273,26 @@ aux4 browser set-snapshot --session <id> --mode off
 
 Modes: `off` (default), `auto` (~50 elements), `full` (all elements).
 
+### Content Blocks
+
+Split the current page into content blocks — headings, paragraphs, list items, article/figure cards, table rows — via a single deterministic DOM walk (no AI). Each block carries `text`, `heading`/`headingPath`, `url` (nearest/enclosing link href), a stable CSS `selector`, a page-order `offset`, and a snapshot `ref` when the block or its nearest ancestor is itself click-able. This is the recommended way to feed page content to a ranker (e.g. `aux4 classify rank`) or an agent — unlike a markdown dump, it never loses the `href` on containers that wrap other content in a link (e.g. an article card).
+
+```bash
+# Blocks of the current page
+aux4 browser blocks --session <id>
+
+# Navigate first, cap block size, include nav/footer
+aux4 browser blocks --session <id> --url https://example.com --maxBlockChars 800 --includeNav true
+```
+
+```json
+[
+  { "id": "b1", "text": "A Light in the Attic", "heading": null, "headingPath": [], "url": null, "selector": "h1", "offset": 0, "ref": null, "tag": "h1" }
+]
+```
+
+Script/style/JSON blobs (e.g. a Next.js `__NEXT_DATA__` script tag) are always skipped, along with hidden elements.
+
 ### Scoping
 
 Restrict commands to a subtree of the DOM:

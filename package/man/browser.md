@@ -46,6 +46,7 @@ aux4 browser <command> [options]
 - `content` — Get page content as markdown, HTML, or text
 - `screenshot` — Take a screenshot
 - `snapshot` — Get an accessibility snapshot of the page
+- `blocks` — Split the page into content blocks (headings, paragraphs, cards, table rows) via a deterministic DOM walk
 - `component` — Interact with structured UI components
 
 **Assertions:**
