@@ -1,5 +1,10 @@
 # Release notes
 
+## 1.0.29
+
+- The user-agent override keeps client hints: `Sec-CH-UA` headers and `navigator.userAgentData` match the user agent (a bare override dropped them, which bot protection reads as automation). Headless brands are reported as `Chromium`.
+- `open --url`, `visit` and `read` report `blocked` (`status`, `requests`, `vendor`, `message`) when the site's own requests were refused with HTTP 403/429 and the page shows no text; `read`'s `warning` says the site's bot protection kept the page from rendering.
+
 ## 1.0.28
 
 - Sessions present a regular Chrome user agent: `HeadlessChrome` becomes `Chrome` and a remote provider's automation token (e.g. `Amazon-Bedrock-AgentCore-Browser/1.0 (...)`) is removed. Fixes single-page apps behind bot management rendering an empty page (their API calls were blocked). `AUX4_BROWSER_USER_AGENT=keep` restores the old behavior; any other value is used as the exact user agent.

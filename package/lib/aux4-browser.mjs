@@ -1021,13 +1021,18 @@ function sanitizeMessage(message) {
 // User-agent policy for every session (local or provider-backed).
 //
 // Some browsers announce themselves as automation in the UA string:
-//   - local headless Chromium:  "... HeadlessChrome/153.0.0.0 ..."
+//   - local headless Chromium:  "... HeadlessChrome/153.0.0.0 ..." (and a
+//                                "HeadlessChrome" client-hint brand)
 //   - Amazon Bedrock AgentCore: "... Chrome/148.0.0.0 Amazon-Bedrock-AgentCore-Browser/1.0
 //                                 (Chromium; +https://docs.aws.amazon.com/...)"
 // Bot-management edges (Imperva/Incapsula, Akamai, ...) key off those tokens
 // and block the page's own API calls (403), so single-page apps render an
 // empty shell (CBR-050: bcbsil's provider finder rendered 0 blocks in
-// AgentCore; with the token stripped it renders fully from the same AWS IP).
+// AgentCore; with the token stripped it renders from the same AWS IP).
+//
+// The override always carries user-agent client hints (Sec-CH-UA headers,
+// navigator.userAgentData): a UA override without them drops the hints
+// entirely, which is itself a strong automation signal.
 //
 // AUX4_BROWSER_USER_AGENT controls it:
 //   unset / ""  -> normalize (strip the tokens above, keep everything else)
@@ -1059,36 +1064,106 @@ function resolveUserAgent(browserUserAgent, setting = process.env.AUX4_BROWSER_U
   return normalized && normalized !== browserUserAgent ? normalized : null;
 }
 
-// The browser's own user agent over CDP (Chromium only; null elsewhere).
-async function browserUserAgent(browser) {
-  if (!browser || typeof browser.newBrowserCDPSession !== "function") return null;
+// The browser's own user agent and product version over CDP (Chromium only;
+// nulls elsewhere).
+async function browserVersion(browser) {
+  if (!browser || typeof browser.newBrowserCDPSession !== "function") return { userAgent: null, product: null };
   let cdp;
   try {
     cdp = await browser.newBrowserCDPSession();
-    const { userAgent } = await cdp.send("Browser.getVersion");
-    return userAgent || null;
+    const { userAgent, product } = await cdp.send("Browser.getVersion");
+    return { userAgent: userAgent || null, product: product || null };
   } catch {
-    return null;
+    return { userAgent: null, product: null };
   } finally {
     if (cdp) await cdp.detach().catch(() => {});
   }
 }
 
-// Apply a user agent to every current and future page of a context that we
-// don't own (a provider's default context): per-page CDP override, re-applied
-// on reattach since overrides live as long as our connection.
-async function applyUserAgentToContext(context, userAgent) {
-  if (!context || !userAgent) return;
-  const apply = async (page) => {
-    try {
-      const cdp = await context.newCDPSession(page);
-      await cdp.send("Network.setUserAgentOverride", { userAgent });
-    } catch {
-      // page closed or target not CDP-capable; best-effort
-    }
+const cleanBrand = (entry) => ({
+  brand: /headless/i.test(entry.brand) ? "Chromium" : entry.brand,
+  version: String(entry.version)
+});
+
+// Client-hint metadata matching `userAgent`. `live` is what the page itself
+// reports (navigator.userAgentData, read before any override) when
+// available; otherwise it is derived from the browser's product version.
+function userAgentMetadata(userAgent, product, live) {
+  const fullVersion = ((product || "").match(/\/([\d.]+)/) || (userAgent || "").match(/Chrome\/([\d.]+)/) || [])[1] || "";
+  const major = fullVersion.split(".")[0] || "";
+  const platform = /Windows/.test(userAgent) ? "Windows"
+    : /Mac OS X|Macintosh/.test(userAgent) ? "macOS"
+      : /Android/.test(userAgent) ? "Android"
+        : /CrOS/.test(userAgent) ? "Chrome OS" : "Linux";
+  if (live && Array.isArray(live.brands) && live.brands.length) {
+    return {
+      brands: live.brands.map(cleanBrand),
+      fullVersionList: (live.fullVersionList || []).map(cleanBrand),
+      fullVersion: live.uaFullVersion || fullVersion,
+      platform: live.platform || platform,
+      platformVersion: live.platformVersion || "",
+      architecture: live.architecture || "",
+      model: live.model || "",
+      mobile: !!live.mobile,
+      bitness: live.bitness || "",
+      wow64: !!live.wow64
+    };
+  }
+  return {
+    brands: [{ brand: "Not/A)Brand", version: "99" }, { brand: "Chromium", version: major }],
+    fullVersionList: [{ brand: "Not/A)Brand", version: "99.0.0.0" }, { brand: "Chromium", version: fullVersion }],
+    fullVersion,
+    platform,
+    platformVersion: "",
+    architecture: /arm|aarch64/i.test(userAgent) ? "arm" : "x86",
+    model: "",
+    mobile: /Mobile/.test(userAgent),
+    bitness: "64",
+    wow64: false
   };
-  await Promise.all(context.pages().map(apply));
-  context.on("page", apply);
+}
+
+// What the page reports about itself (before any override), or null.
+async function readLiveMetadata(page) {
+  try {
+    return await page.evaluate(async () => {
+      const d = navigator.userAgentData;
+      if (!d) return null;
+      const h = await d.getHighEntropyValues(["architecture", "bitness", "model", "platformVersion", "fullVersionList", "uaFullVersion", "wow64"]);
+      return { brands: d.brands, mobile: d.mobile, platform: d.platform, ...h };
+    });
+  } catch {
+    return null;
+  }
+}
+
+// Apply a user agent (with client hints) to every current and future page of
+// a context over CDP. Returns `ensure(page)` — idempotent, awaited before a
+// navigation so a page created a moment ago can't race its first request
+// ahead of the override. Overrides last as long as our connection, so a
+// reattach applies them again.
+async function applyUserAgentToContext(context, userAgent, metadata) {
+  if (!context || !userAgent) return async () => {};
+  const done = new WeakMap();
+  const ensure = (page) => {
+    if (!page) return Promise.resolve();
+    if (!done.has(page)) {
+      done.set(page, (async () => {
+        try {
+          const cdp = await context.newCDPSession(page);
+          const params = { userAgent };
+          if (metadata) params.userAgentMetadata = metadata;
+          await cdp.send("Network.setUserAgentOverride", params);
+        } catch {
+          // page closed or target not CDP-capable; best-effort
+        }
+      })());
+    }
+    return done.get(page);
+  };
+  await Promise.all(context.pages().map(ensure));
+  context.on("page", ensure);
+  return ensure;
 }
 
 // Where the daemon keeps its socket, pid file and artifacts.
@@ -1162,6 +1237,17 @@ function decodeSessionId(id) {
   const idx = typeof id === "string" ? id.indexOf(":") : -1;
   if (idx === -1) return null;
   return { provider: id.slice(0, idx), token: id.slice(idx + 1) };
+}
+
+// Which bot-management / CDN edge answered, from its response headers.
+function botVendor(headers = {}) {
+  const h = (name) => headers[name] || "";
+  if (h("x-iinfo") || /imperva|incapsula/i.test(h("x-cdn"))) return "Imperva";
+  if (h("cf-ray") || /cloudflare/i.test(h("server"))) return "Cloudflare";
+  if (h("x-datadome") || h("x-dd-b")) return "DataDome";
+  if (h("akamai-grn") || /akamai/i.test(h("server")) || /ak_p/.test(h("server-timing"))) return "Akamai";
+  if (Object.keys(headers).some(k => /^x-px/i.test(k))) return "HUMAN (PerimeterX)";
+  return null;
 }
 
 class SessionManager {
@@ -1311,14 +1397,33 @@ class SessionManager {
 
   async _navigate(page, url, waitUntil) {
     const strategy = waitUntil || "load";
+    const ensureUserAgent = page.context().__aux4EnsureUserAgent;
+    if (ensureUserAgent) await ensureUserAgent(page);
+    const refused = [];
+    const onResponse = (r) => {
+      try {
+        const status = r.status();
+        if (status !== 403 && status !== 429) return;
+        if (!["document", "xhr", "fetch"].includes(r.request().resourceType())) return;
+        refused.push({ status, url: r.url().split("?")[0], vendor: botVendor(r.headers()) });
+      } catch {
+        // response of a closed page
+      }
+    };
+    page.on("response", onResponse);
     let response;
-    if (strategy === "settle") {
-      response = await page.goto(url, { waitUntil: "domcontentloaded" });
-      await this._waitForSettle(page);
-    } else {
-      response = await page.goto(url, { waitUntil: strategy });
+    try {
+      if (strategy === "settle") {
+        response = await page.goto(url, { waitUntil: "domcontentloaded" });
+        await this._waitForSettle(page);
+      } else {
+        response = await page.goto(url, { waitUntil: strategy });
+      }
+      if (strategy !== "commit") await this._waitForContent(page);
+    } finally {
+      page.off("response", onResponse);
     }
-    if (strategy !== "commit") await this._waitForContent(page);
+    page.__aux4Refused = refused;
     return response;
   }
 
@@ -1365,8 +1470,13 @@ class SessionManager {
   // own UA normalized (HeadlessChrome -> Chrome) unless configured otherwise.
   async _localUserAgent(localBrowser) {
     if (this._localUserAgentCache === undefined) {
-      const own = await browserUserAgent(localBrowser);
-      this._localUserAgentCache = own ? resolveUserAgent(own) : resolveUserAgent("", process.env.AUX4_BROWSER_USER_AGENT);
+      const { userAgent: own, product } = await browserVersion(localBrowser);
+      const userAgent = resolveUserAgent(own || "");
+      this._localUserAgentCache = userAgent ? {
+        userAgent,
+        cdp: !!own,
+        metadata: /Chrome\//.test(userAgent) ? userAgentMetadata(userAgent, product, null) : null
+      } : null;
     }
     return this._localUserAgentCache;
   }
@@ -1374,9 +1484,15 @@ class SessionManager {
   // Provider-backed sessions reuse the provider's default context, so the UA
   // is overridden per page over CDP on every (re)attach.
   async _applyRemoteUserAgent(providerBrowser, context) {
-    const own = await browserUserAgent(providerBrowser);
+    const { userAgent: own, product } = await browserVersion(providerBrowser);
     const userAgent = resolveUserAgent(own || "");
-    if (userAgent) await applyUserAgentToContext(context, userAgent);
+    if (!userAgent) return;
+    // client hints as the page reports them before any override (exact
+    // GREASE brand/versions), derived from the product version otherwise
+    const first = context.pages()[0];
+    const live = first ? await readLiveMetadata(first) : null;
+    const metadata = /Chrome\//.test(userAgent) ? userAgentMetadata(userAgent, product, live) : null;
+    context.__aux4EnsureUserAgent = await applyUserAgentToContext(context, userAgent, metadata);
   }
 
   async _waitForSettle(page, quietMs = 300) {
@@ -1407,7 +1523,31 @@ class SessionManager {
   async _pageInfoAsync(page, response) {
     const info = this._pageInfo(page, response);
     try { info.title = await page.title(); } catch { info.title = ""; }
+    const blocked = await this._blockedInfo(page);
+    if (blocked) info.blocked = blocked;
     return info;
+  }
+
+  // The site's own requests were refused (HTTP 403/429 on the page's host)
+  // AND the page shows no text: bot protection kept the page from rendering.
+  // Reported so a caller can say so instead of treating it as an empty page.
+  async _blockedInfo(page) {
+    const refused = page.__aux4Refused || [];
+    if (!refused.length) return null;
+    let host = "";
+    try { host = new URL(page.url()).hostname; } catch { return null; }
+    const site = host.split(".").slice(-2).join(".");
+    const own = refused.filter(r => { try { return new URL(r.url).hostname.endsWith(site); } catch { return false; } });
+    if (!own.length) return null;
+    const textLength = await page.evaluate(() => (document.body?.innerText || "").trim().length).catch(() => -1);
+    if (textLength !== 0) return null;
+    const vendor = own.map(r => r.vendor).find(Boolean) || null;
+    return {
+      status: own[0].status,
+      requests: own.length,
+      ...(vendor ? { vendor } : {}),
+      message: `the site${vendor ? `'s bot protection (${vendor})` : ""} refused the page's own requests (HTTP ${own[0].status}), so the page did not render`
+    };
   }
 
   async open(params = {}) {
@@ -1469,9 +1609,13 @@ class SessionManager {
         contextOptions.recordVideo = { dir: videoDir };
       }
       const localBrowser = await this.getLocalBrowser();
-      const userAgent = await this._localUserAgent(localBrowser);
-      if (userAgent) contextOptions.userAgent = userAgent;
+      const local = await this._localUserAgent(localBrowser);
+      // non-Chromium engines have no CDP: plain context user agent
+      if (local && !local.cdp) contextOptions.userAgent = local.userAgent;
       context = await localBrowser.newContext(contextOptions);
+      if (local && local.cdp) {
+        context.__aux4EnsureUserAgent = await applyUserAgentToContext(context, local.userAgent, local.metadata);
+      }
       page = await context.newPage();
       id = crypto.randomUUID().slice(0, 8);
     }
@@ -1902,7 +2046,9 @@ class SessionManager {
     const page = session.pages[session.activeTab];
     const response = await this._navigate(page, url, waitUntil);
     const info = await this._pageInfoAsync(page, response);
-    const { content, warning } = await ContentExtractor.extract(page, { format });
+    const extracted = await ContentExtractor.extract(page, { format });
+    const content = extracted.content;
+    const warning = info.blocked ? info.blocked.message : extracted.warning;
 
     if (params.output) {
       const filePath = this._writeArtifact(

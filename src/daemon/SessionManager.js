@@ -9,7 +9,7 @@ import { ComponentResolver } from "../lib/ComponentResolver.js";
 import { BrowserEngine } from "./BrowserEngine.js";
 import { ProviderBridge } from "./ProviderBridge.js";
 import { fingerprintSessionId } from "../lib/Redact.js";
-import { resolveUserAgent, browserUserAgent, applyUserAgentToContext } from "../lib/UserAgent.js";
+import { resolveUserAgent, browserVersion, applyUserAgentToContext, userAgentMetadata, readLiveMetadata } from "../lib/UserAgent.js";
 
 import { ARTIFACTS_DIR } from "../lib/Paths.js";
 
@@ -55,6 +55,17 @@ function decodeSessionId(id) {
   const idx = typeof id === "string" ? id.indexOf(":") : -1;
   if (idx === -1) return null;
   return { provider: id.slice(0, idx), token: id.slice(idx + 1) };
+}
+
+// Which bot-management / CDN edge answered, from its response headers.
+function botVendor(headers = {}) {
+  const h = (name) => headers[name] || "";
+  if (h("x-iinfo") || /imperva|incapsula/i.test(h("x-cdn"))) return "Imperva";
+  if (h("cf-ray") || /cloudflare/i.test(h("server"))) return "Cloudflare";
+  if (h("x-datadome") || h("x-dd-b")) return "DataDome";
+  if (h("akamai-grn") || /akamai/i.test(h("server")) || /ak_p/.test(h("server-timing"))) return "Akamai";
+  if (Object.keys(headers).some(k => /^x-px/i.test(k))) return "HUMAN (PerimeterX)";
+  return null;
 }
 
 export class SessionManager {
@@ -204,14 +215,33 @@ export class SessionManager {
 
   async _navigate(page, url, waitUntil) {
     const strategy = waitUntil || "load";
+    const ensureUserAgent = page.context().__aux4EnsureUserAgent;
+    if (ensureUserAgent) await ensureUserAgent(page);
+    const refused = [];
+    const onResponse = (r) => {
+      try {
+        const status = r.status();
+        if (status !== 403 && status !== 429) return;
+        if (!["document", "xhr", "fetch"].includes(r.request().resourceType())) return;
+        refused.push({ status, url: r.url().split("?")[0], vendor: botVendor(r.headers()) });
+      } catch {
+        // response of a closed page
+      }
+    };
+    page.on("response", onResponse);
     let response;
-    if (strategy === "settle") {
-      response = await page.goto(url, { waitUntil: "domcontentloaded" });
-      await this._waitForSettle(page);
-    } else {
-      response = await page.goto(url, { waitUntil: strategy });
+    try {
+      if (strategy === "settle") {
+        response = await page.goto(url, { waitUntil: "domcontentloaded" });
+        await this._waitForSettle(page);
+      } else {
+        response = await page.goto(url, { waitUntil: strategy });
+      }
+      if (strategy !== "commit") await this._waitForContent(page);
+    } finally {
+      page.off("response", onResponse);
     }
-    if (strategy !== "commit") await this._waitForContent(page);
+    page.__aux4Refused = refused;
     return response;
   }
 
@@ -258,8 +288,13 @@ export class SessionManager {
   // own UA normalized (HeadlessChrome -> Chrome) unless configured otherwise.
   async _localUserAgent(localBrowser) {
     if (this._localUserAgentCache === undefined) {
-      const own = await browserUserAgent(localBrowser);
-      this._localUserAgentCache = own ? resolveUserAgent(own) : resolveUserAgent("", process.env.AUX4_BROWSER_USER_AGENT);
+      const { userAgent: own, product } = await browserVersion(localBrowser);
+      const userAgent = resolveUserAgent(own || "");
+      this._localUserAgentCache = userAgent ? {
+        userAgent,
+        cdp: !!own,
+        metadata: /Chrome\//.test(userAgent) ? userAgentMetadata(userAgent, product, null) : null
+      } : null;
     }
     return this._localUserAgentCache;
   }
@@ -267,9 +302,15 @@ export class SessionManager {
   // Provider-backed sessions reuse the provider's default context, so the UA
   // is overridden per page over CDP on every (re)attach.
   async _applyRemoteUserAgent(providerBrowser, context) {
-    const own = await browserUserAgent(providerBrowser);
+    const { userAgent: own, product } = await browserVersion(providerBrowser);
     const userAgent = resolveUserAgent(own || "");
-    if (userAgent) await applyUserAgentToContext(context, userAgent);
+    if (!userAgent) return;
+    // client hints as the page reports them before any override (exact
+    // GREASE brand/versions), derived from the product version otherwise
+    const first = context.pages()[0];
+    const live = first ? await readLiveMetadata(first) : null;
+    const metadata = /Chrome\//.test(userAgent) ? userAgentMetadata(userAgent, product, live) : null;
+    context.__aux4EnsureUserAgent = await applyUserAgentToContext(context, userAgent, metadata);
   }
 
   async _waitForSettle(page, quietMs = 300) {
@@ -300,7 +341,31 @@ export class SessionManager {
   async _pageInfoAsync(page, response) {
     const info = this._pageInfo(page, response);
     try { info.title = await page.title(); } catch { info.title = ""; }
+    const blocked = await this._blockedInfo(page);
+    if (blocked) info.blocked = blocked;
     return info;
+  }
+
+  // The site's own requests were refused (HTTP 403/429 on the page's host)
+  // AND the page shows no text: bot protection kept the page from rendering.
+  // Reported so a caller can say so instead of treating it as an empty page.
+  async _blockedInfo(page) {
+    const refused = page.__aux4Refused || [];
+    if (!refused.length) return null;
+    let host = "";
+    try { host = new URL(page.url()).hostname; } catch { return null; }
+    const site = host.split(".").slice(-2).join(".");
+    const own = refused.filter(r => { try { return new URL(r.url).hostname.endsWith(site); } catch { return false; } });
+    if (!own.length) return null;
+    const textLength = await page.evaluate(() => (document.body?.innerText || "").trim().length).catch(() => -1);
+    if (textLength !== 0) return null;
+    const vendor = own.map(r => r.vendor).find(Boolean) || null;
+    return {
+      status: own[0].status,
+      requests: own.length,
+      ...(vendor ? { vendor } : {}),
+      message: `the site${vendor ? `'s bot protection (${vendor})` : ""} refused the page's own requests (HTTP ${own[0].status}), so the page did not render`
+    };
   }
 
   async open(params = {}) {
@@ -362,9 +427,13 @@ export class SessionManager {
         contextOptions.recordVideo = { dir: videoDir };
       }
       const localBrowser = await this.getLocalBrowser();
-      const userAgent = await this._localUserAgent(localBrowser);
-      if (userAgent) contextOptions.userAgent = userAgent;
+      const local = await this._localUserAgent(localBrowser);
+      // non-Chromium engines have no CDP: plain context user agent
+      if (local && !local.cdp) contextOptions.userAgent = local.userAgent;
       context = await localBrowser.newContext(contextOptions);
+      if (local && local.cdp) {
+        context.__aux4EnsureUserAgent = await applyUserAgentToContext(context, local.userAgent, local.metadata);
+      }
       page = await context.newPage();
       id = crypto.randomUUID().slice(0, 8);
     }
@@ -795,7 +864,9 @@ export class SessionManager {
     const page = session.pages[session.activeTab];
     const response = await this._navigate(page, url, waitUntil);
     const info = await this._pageInfoAsync(page, response);
-    const { content, warning } = await ContentExtractor.extract(page, { format });
+    const extracted = await ContentExtractor.extract(page, { format });
+    const content = extracted.content;
+    const warning = info.blocked ? info.blocked.message : extracted.warning;
 
     if (params.output) {
       const filePath = this._writeArtifact(

@@ -253,7 +253,24 @@ Single-page apps often finish loading with an empty page and render a few second
 
 #### User agent
 
-Sessions present a regular Chrome user agent. Browsers that announce automation in their user agent — local headless Chromium (`HeadlessChrome/...`) and remote providers such as Amazon Bedrock AgentCore (`Amazon-Bedrock-AgentCore-Browser/1.0 ...`) — have that token removed; everything else (platform, Chrome version) is kept. Some bot-management services block a page's own API calls for those tokens, which leaves a single-page app rendering an empty page.
+Sessions present a regular Chrome user agent. Browsers that announce automation in their user agent — local headless Chromium (`HeadlessChrome/...`) and remote providers such as Amazon Bedrock AgentCore (`Amazon-Bedrock-AgentCore-Browser/1.0 ...`) — have that token removed; everything else (platform, Chrome version) is kept. Some bot-management services block a page's own API calls for those tokens, which leaves a single-page app rendering an empty page. The user-agent client hints (`Sec-CH-UA` headers, `navigator.userAgentData`) are kept consistent with it.
+
+#### Blocked pages
+
+When the site's own requests are refused (HTTP 403/429 on the page's site) and the page shows no text, `open --url`, `visit` and `read` return a `blocked` object (`status`, `requests`, `vendor` when the bot-protection service can be told from the response headers, e.g. `Imperva`, `Cloudflare`, `Akamai`, `DataDome`) and `read` uses its `message` as the `warning`:
+
+```json
+{
+  "status": "ok",
+  "title": "Sapphire365",
+  "blocked": {
+    "status": 403,
+    "requests": 1,
+    "vendor": "Imperva",
+    "message": "the site's bot protection (Imperva) refused the page's own requests (HTTP 403), so the page did not render"
+  }
+}
+```
 
 Set `AUX4_BROWSER_USER_AGENT` in the daemon's environment to change this:
 

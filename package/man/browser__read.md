@@ -11,6 +11,7 @@ The `markdown` and `text` formats return only readable page text:
 - **Links kept** — links that span several lines still come out as `[label](href)`
 - **Web components** — text inside open shadow roots is included where it renders
 - **Frames** — the readable text of every visible child frame (at least 100x50 px; tracking pixels and hidden frames are skipped) follows the page's own content after a `---` line
+- **Blocked pages** — when the site's own requests are refused (HTTP 403/429) and the page shows no text, the result carries a `blocked` object (`status`, `requests`, `vendor` such as `Imperva`/`Cloudflare`/`Akamai`/`DataDome`) and `warning` explains that the site's bot protection kept the page from rendering
 - **Rendered content** — after navigating, the read waits up to 8 seconds (`AUX4_BROWSER_CONTENT_WAIT` ms on the daemon, `0` disables) for a single-page app to show rendered text; a static page with no scripts returns immediately
 
 The `html` format returns the raw HTML unchanged.
