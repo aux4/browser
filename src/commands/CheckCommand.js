@@ -6,7 +6,9 @@ export async function CheckCommand(params) {
     session: params.session,
     name: params.name,
     role: params.role,
-    ref: params.ref
+    ref: params.ref,
+    selector: params.selector,
+    within: params.within
   });
   console.log(JSON.stringify(result));
 }
@@ -17,7 +19,9 @@ export async function UncheckCommand(params) {
     session: params.session,
     name: params.name,
     role: params.role,
-    ref: params.ref
+    ref: params.ref,
+    selector: params.selector,
+    within: params.within
   });
   console.log(JSON.stringify(result));
 }

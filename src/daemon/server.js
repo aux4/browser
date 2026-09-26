@@ -143,7 +143,7 @@ export class DaemonServer {
       case "content": return this.sessionManager.content(params.session, params);
       case "screenshot": return this.sessionManager.screenshot(params.session, params);
       case "wait": return this.sessionManager.wait(params.session, params);
-      case "eval": return this.sessionManager.evaluate(params.session, params.script);
+      case "eval": return this.sessionManager.evaluate(params.session, params.script, params);
       case "expect": return this.sessionManager.expect(params.session, params);
       case "expect-list": return this.sessionManager.expectList(params.session, params);
       case "get-items": return this.sessionManager.getItems(params.session, params);

@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.29",
+  "version": "1.0.30",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -455,7 +455,7 @@
         {
           "name": "type",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,ref,within)"
+            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,ref,within,selector)"
           ],
           "help": {
             "text": "Type text into an input field",
@@ -490,6 +490,11 @@
               {
                 "name": "within",
                 "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
+                "default": ""
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector of the element (pierces open shadow roots; combine with --within for iframes), overrides name/role/ref",
                 "default": ""
               }
             ]
@@ -529,7 +534,7 @@
         {
           "name": "select",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs select values(session,name,value,role,ref)"
+            "node ${packageDir}/lib/aux4-browser.mjs select values(session,name,value,role,ref,selector,within)"
           ],
           "help": {
             "text": "Select an option from a dropdown",
@@ -558,6 +563,16 @@
                 "name": "ref",
                 "text": "Snapshot ref index (from snapshot command), overrides name/role",
                 "default": ""
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector of the element (pierces open shadow roots; combine with --within for iframes), overrides name/role/ref",
+                "default": ""
+              },
+              {
+                "name": "within",
+                "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
+                "default": ""
               }
             ]
           }
@@ -565,7 +580,7 @@
         {
           "name": "check",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs check values(session,name,role,ref)"
+            "node ${packageDir}/lib/aux4-browser.mjs check values(session,name,role,ref,selector,within)"
           ],
           "help": {
             "text": "Check a checkbox",
@@ -589,6 +604,16 @@
                 "name": "ref",
                 "text": "Snapshot ref index (from snapshot command), overrides name/role",
                 "default": ""
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector of the element (pierces open shadow roots; combine with --within for iframes), overrides name/role/ref",
+                "default": ""
+              },
+              {
+                "name": "within",
+                "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
+                "default": ""
               }
             ]
           }
@@ -596,7 +621,7 @@
         {
           "name": "uncheck",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs uncheck values(session,name,role,ref)"
+            "node ${packageDir}/lib/aux4-browser.mjs uncheck values(session,name,role,ref,selector,within)"
           ],
           "help": {
             "text": "Uncheck a checkbox",
@@ -619,6 +644,16 @@
               {
                 "name": "ref",
                 "text": "Snapshot ref index (from snapshot command), overrides name/role",
+                "default": ""
+              },
+              {
+                "name": "selector",
+                "text": "CSS selector of the element (pierces open shadow roots; combine with --within for iframes), overrides name/role/ref",
+                "default": ""
+              },
+              {
+                "name": "within",
+                "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
                 "default": ""
               }
             ]
@@ -990,7 +1025,7 @@
         {
           "name": "eval",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs eval values(session,script)"
+            "node ${packageDir}/lib/aux4-browser.mjs eval values(session,script,within)"
           ],
           "help": {
             "text": "Evaluate JavaScript in the page",
@@ -1004,6 +1039,11 @@
                 "name": "script",
                 "text": "JavaScript code to evaluate",
                 "required": true
+              },
+              {
+                "name": "within",
+                "text": "Optional iframe CSS selector: run the script inside that frame's document (works for cross-origin frames); nest with >>>",
+                "default": ""
               }
             ]
           }

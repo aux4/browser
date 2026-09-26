@@ -792,6 +792,11 @@ export class SessionManager {
 
   async type(sessionId, params) {
     const session = await this.resolveSession(sessionId);
+    if (params.selector) {
+      // CSS selector (pierces open shadow roots; --within for iframes)
+      await this.getBase(session, params).locator(params.selector).first().fill(params.value, { timeout: parseInt(params.timeout) || 5000 });
+      return this._attachSnapshot(session, { status: "ok" });
+    }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.fill(params.value);
@@ -1047,6 +1052,15 @@ export class SessionManager {
   async select(sessionId, params) {
     const session = await this.resolveSession(sessionId);
     const timeout = parseInt(params.timeout) || 5000;
+    if (params.selector) {
+      const element = await this.getBase(session, params).locator(params.selector).first().elementHandle({ timeout });
+      try {
+        await this._selectOn(session, element, params.value, timeout);
+      } finally {
+        await element.dispose();
+      }
+      return this._attachSnapshot(session, { status: "ok" });
+    }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       try {
@@ -1119,6 +1133,10 @@ export class SessionManager {
 
   async check(sessionId, params) {
     const session = await this.resolveSession(sessionId);
+    if (params.selector) {
+      await this.getBase(session, params).locator(params.selector).first().check({ timeout: parseInt(params.timeout) || 5000 });
+      return this._attachSnapshot(session, { status: "ok" });
+    }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.check({ timeout: parseInt(params.timeout) || 5000 });
@@ -1133,6 +1151,10 @@ export class SessionManager {
 
   async uncheck(sessionId, params) {
     const session = await this.resolveSession(sessionId);
+    if (params.selector) {
+      await this.getBase(session, params).locator(params.selector).first().uncheck({ timeout: parseInt(params.timeout) || 5000 });
+      return this._attachSnapshot(session, { status: "ok" });
+    }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.uncheck({ timeout: parseInt(params.timeout) || 5000 });
@@ -1179,9 +1201,22 @@ export class SessionManager {
     return { status: "ok" };
   }
 
-  async evaluate(sessionId, script) {
+  async evaluate(sessionId, script, params = {}) {
     const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
+    if (params.within) {
+      // run inside an iframe's document (nest with >>>), e.g. a cross-origin
+      // frame the page's own script cannot reach
+      let frame = page.mainFrame();
+      for (const sel of String(params.within).split(">>>").map(s => s.trim()).filter(Boolean)) {
+        const handle = await frame.locator(sel).first().elementHandle({ timeout: parseInt(params.timeout) || 5000 });
+        const child = handle ? await handle.contentFrame() : null;
+        if (handle) await handle.dispose();
+        if (!child) throw new Error(`eval: no frame for --within "${sel}"`);
+        frame = child;
+      }
+      return { result: await frame.evaluate(script) };
+    }
     const result = await page.evaluate(script);
     return { result };
   }

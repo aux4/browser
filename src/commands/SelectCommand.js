@@ -7,7 +7,9 @@ export async function SelectCommand(params) {
     name: params.name,
     value: params.value,
     role: params.role,
-    ref: params.ref
+    ref: params.ref,
+    selector: params.selector,
+    within: params.within
   });
   console.log(JSON.stringify(result));
 }
