@@ -299,6 +299,14 @@ aux4 browser snapshot --session <id> --format text
 
 Elements inside open shadow roots (web components) get refs like any other element, so `--ref` actions reach them. Elements inside iframes don't get refs; when the page has visible frames the snapshot lists them under `frames` with a ready-made `--within` selector to act inside them.
 
+`type`, `select`, `check` and `uncheck` also take `--selector <css>` (it reaches elements inside open shadow roots) and `--within <iframe-css>`; `eval --within <iframe-css>` runs a script inside a frame's document, cross-origin frames included:
+
+```bash
+aux4 browser type --session $SESSION --selector "#zip" --value 90292
+aux4 browser check --session $SESSION --selector "#terms" --within "iframe#checkout"
+aux4 browser eval --session $SESSION --within "iframe#checkout" --script "document.title"
+```
+
 #### Auto-Snapshot on Actions
 
 Enable auto-snapshot to receive page state after every action (click, visit, scroll, type, etc.) without extra commands:

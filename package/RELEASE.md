@@ -1,5 +1,10 @@
 # Release notes
 
+## 1.0.30
+
+- `type`, `select`, `check` and `uncheck` accept `--selector <css>` (reaches elements inside open shadow roots) and `--within <iframe-css>`, so an element found by a page script can be acted on exactly.
+- `eval --within <iframe-css>` runs the script inside a frame's document (cross-origin frames included; nest with `>>>`).
+
 ## 1.0.29
 
 - The user-agent override keeps client hints: `Sec-CH-UA` headers and `navigator.userAgentData` match the user agent (a bare override dropped them, which bot protection reads as automation). Headless brands are reported as `Chromium`.
