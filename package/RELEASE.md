@@ -1,5 +1,11 @@
 # Release notes
 
+## 1.0.28
+
+- Sessions present a regular Chrome user agent: `HeadlessChrome` becomes `Chrome` and a remote provider's automation token (e.g. `Amazon-Bedrock-AgentCore-Browser/1.0 (...)`) is removed. Fixes single-page apps behind bot management rendering an empty page (their API calls were blocked). `AUX4_BROWSER_USER_AGENT=keep` restores the old behavior; any other value is used as the exact user agent.
+- Navigations wait (up to 8s, `AUX4_BROWSER_CONTENT_WAIT`) for the page to show rendered text before returning, so `read`/`blocks`/`snapshot` don't capture a still-empty single-page app.
+- `read`, `content`, `blocks` and `snapshot` see web components: open shadow roots are walked (with refs for their elements). `read`/`content`/`blocks` include the content of visible child frames; `snapshot` lists visible frames with a `--within` selector.
+
 ## 1.0.27
 
 - `read` / `content` (markdown, text): readable text only. Script, style, noscript, template, iframe and svg content, JSON-LD and embedded JSON data blobs are dropped; a page's main landmark comes first, then `---` and the rest of the page. Multi-line links keep their `[label](href)`.

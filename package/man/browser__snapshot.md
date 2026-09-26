@@ -11,6 +11,8 @@ This is the recommended way for AI agents to understand page state without takin
 
 Each element has a `ref` number stable within the snapshot. Use `browser click --ref <n>` to click elements by their snapshot ref.
 
+Elements inside open shadow roots (web components) are included and get refs like any other element. Elements inside iframes are not; when the page has visible frames (at least 100x50 px), the snapshot adds a `frames` list with each frame's `url` and a `within` selector to pass as `--within` to act inside it.
+
 #### Usage
 
 ```bash

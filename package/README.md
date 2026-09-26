@@ -245,6 +245,26 @@ aux4 browser screenshot --session <id> --output page.png --fullPage true
 
 `content` and `read` in `markdown`/`text` format return readable text only: scripts, styles, JSON-LD and embedded JSON data blobs are dropped, and on a page with a main landmark (`<main>` / `role="main"`) the main content comes first, followed by `---` and the rest of the page. `--format html` returns the raw HTML.
 
+Web components and frames are read too: text inside open shadow roots is included where it renders, and the readable text of every visible child frame (at least 100x50 px — tracking pixels and hidden frames are skipped) follows the page's own content, separated by `---`.
+
+#### Waiting for rendered content
+
+Single-page apps often finish loading with an empty page and render a few seconds later. Every navigation (`open --url`, `visit`, `read`, `blocks --url`) waits until the page shows rendered text — in the document, an open shadow root or a child frame — for up to 8 seconds. A static page with no scripts returns immediately. Set `AUX4_BROWSER_CONTENT_WAIT` (milliseconds) on the daemon to change the cap, or `0` to turn it off.
+
+#### User agent
+
+Sessions present a regular Chrome user agent. Browsers that announce automation in their user agent — local headless Chromium (`HeadlessChrome/...`) and remote providers such as Amazon Bedrock AgentCore (`Amazon-Bedrock-AgentCore-Browser/1.0 ...`) — have that token removed; everything else (platform, Chrome version) is kept. Some bot-management services block a page's own API calls for those tokens, which leaves a single-page app rendering an empty page.
+
+Set `AUX4_BROWSER_USER_AGENT` in the daemon's environment to change this:
+
+```bash
+# keep the browser's own user agent unchanged
+AUX4_BROWSER_USER_AGENT=keep aux4 browser start
+
+# use an exact user agent string
+AUX4_BROWSER_USER_AGENT="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36" aux4 browser start
+```
+
 ### Accessibility Snapshots
 
 Snapshots return a lightweight accessibility tree of the page, listing interactive elements (buttons, links, inputs) and components (tables, forms, lists, navs). This is the recommended way for AI agents to understand page state without screenshots.
@@ -259,6 +279,8 @@ aux4 browser snapshot --session <id> --mode full
 # Text format for readability
 aux4 browser snapshot --session <id> --format text
 ```
+
+Elements inside open shadow roots (web components) get refs like any other element, so `--ref` actions reach them. Elements inside iframes don't get refs; when the page has visible frames the snapshot lists them under `frames` with a ready-made `--within` selector to act inside them.
 
 #### Auto-Snapshot on Actions
 
@@ -296,6 +318,8 @@ aux4 browser blocks --session <id> --url https://example.com --maxBlockChars 800
 ```
 
 Script/style/JSON blobs (e.g. a Next.js `__NEXT_DATA__` script tag) are always skipped, along with hidden elements.
+
+Content inside open shadow roots becomes blocks in page order. Blocks from visible child frames follow the page's own blocks, carry a `frame` field with the frame URL, and have no `ref` (use `--within` to act inside a frame).
 
 ### Scoping
 

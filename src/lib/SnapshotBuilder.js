@@ -1,3 +1,5 @@
+import { visibleChildFrames } from "./BlocksBuilder.js";
+
 /**
  * SnapshotBuilder — builds a compact accessibility snapshot of the current page.
  *
@@ -111,7 +113,8 @@ export class SnapshotBuilder {
         return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
       };
 
-      const all = Array.from(document.querySelectorAll("*"));
+      // document order, open shadow roots walked right after their host
+      const all = (() => { const out = []; const walk = (root) => { for (const el of root.querySelectorAll("*")) { out.push(el); if (el.shadowRoot) walk(el.shadowRoot); } }; walk(document); return out; })();
       const elements = [];
       const components = [];
       let ref = 0;
@@ -160,7 +163,36 @@ export class SnapshotBuilder {
       };
     }, { interactiveRoles: INTERACTIVE_ROLES, componentRoles: COMPONENT_ROLES, full });
 
+    // Visible child frames aren't walked for refs (refs address the top
+    // document); list them so an agent can act inside with --within.
+    const frames = await SnapshotBuilder.frames(page);
+    if (frames.length) data.frames = frames;
+
     return data;
+  }
+
+  static async frames(page) {
+    const out = [];
+    let frames = [];
+    try { frames = await visibleChildFrames(page); } catch { return out; }
+    for (const frame of frames) {
+      try {
+        const element = await frame.frameElement();
+        const within = await element.evaluate((el) => {
+          if (el.id) return `#${CSS.escape(el.id)}`;
+          for (const attr of ["name", "title", "src"]) {
+            const v = el.getAttribute(attr);
+            if (v) return `iframe[${attr}="${v.replace(/"/g, '\\"')}"]`;
+          }
+          return null;
+        });
+        await element.dispose();
+        out.push({ url: frame.url(), ...(within ? { within } : {}) });
+      } catch {
+        // detached
+      }
+    }
+    return out;
   }
 
   /**
@@ -186,6 +218,10 @@ export class SnapshotBuilder {
       lines.push(`  [${e.ref}] ${e.role} "${e.name}"${e.disabled ? " (disabled)" : ""}`);
     }
     if (snapshot.truncated) lines.push(`  ... and ${snapshot.truncated} more`);
+    if (snapshot.frames?.length) {
+      lines.push("", "## Frames");
+      for (const f of snapshot.frames) lines.push(`  ${f.url}${f.within ? ` (--within '${f.within}')` : ""}`);
+    }
     return lines.join("\n");
   }
 }

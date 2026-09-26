@@ -1,3 +1,5 @@
+import { visibleChildFrames } from "./BlocksBuilder.js";
+
 // Tags whose content is never readable page text. Same skip rules as
 // `browser blocks` (script/style/noscript/template/iframe/svg), plus the
 // head-only tags that can end up in <body> on sloppy pages.
@@ -41,6 +43,13 @@ export class ContentExtractor {
       }
     }
 
+    // Readable text rendered inside visible child frames is appended after the
+    // page's own content (whole-page reads only; html format stays verbatim).
+    if (!selector && format !== "html") {
+      const frameTexts = await ContentExtractor.extractFrames(page, format);
+      if (frameTexts.length) content = [content, ...frameTexts].filter(Boolean).join("\n\n---\n\n").trim();
+    }
+
     const result = { content };
     const warning = ContentExtractor.checkContent(page, content);
     if (warning) result.warning = warning;
@@ -55,7 +64,25 @@ export class ContentExtractor {
   // page's own content.
   static async cleanHtml(element, mainFirst) {
     return element.evaluate((root, { skipTags, blobMinChars, mainFirst }) => {
-      const clone = root.cloneNode(true);
+      // Open shadow roots are flattened into the clone as rendered (slots
+      // replaced by their assigned light-DOM nodes), so web-component text
+      // is readable; pages without shadow roots take the native fast path.
+      const hasShadow = root.shadowRoot || [...root.querySelectorAll("*")].some(el => el.shadowRoot);
+      const composedClone = (node) => {
+        if (node.nodeType !== 1) return node.cloneNode(false);
+        if (node.tagName === "SLOT") {
+          const frag = document.createDocumentFragment();
+          const assigned = node.assignedNodes({ flatten: true });
+          const source = assigned.length ? assigned : [...node.childNodes];
+          for (const child of source) frag.appendChild(composedClone(child));
+          return frag;
+        }
+        const copy = node.cloneNode(false);
+        const children = node.shadowRoot ? node.shadowRoot.childNodes : node.childNodes;
+        for (const child of children) copy.appendChild(composedClone(child));
+        return copy;
+      };
+      const clone = hasShadow ? composedClone(root) : root.cloneNode(true);
       clone.querySelectorAll(skipTags.join(",")).forEach(el => el.remove());
       clone.querySelectorAll("[hidden], [aria-hidden='true']").forEach(el => {
         // icons and screen-reader-hidden decorations; keep anything substantial
@@ -79,6 +106,29 @@ export class ContentExtractor {
       main.remove();
       return { main: mainHtml, rest: clone.innerHTML };
     }, { skipTags: SKIP_TAGS, blobMinChars: BLOB_MIN_CHARS, mainFirst });
+  }
+
+  static async extractFrames(page, format) {
+    const out = [];
+    let frames = [];
+    try { frames = await visibleChildFrames(page); } catch { return out; }
+    for (const frame of frames) {
+      try {
+        const body = await frame.$("body");
+        if (!body) continue;
+        const { main, rest } = await Promise.race([
+          ContentExtractor.cleanHtml(body, true),
+          new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 5000))
+        ]);
+        await body.dispose();
+        const convert = format === "text" ? ContentExtractor.htmlToText : ContentExtractor.htmlToMarkdown;
+        const text = [main, rest].filter(h => h && h.trim()).map(h => convert(h)).filter(Boolean).join("\n\n").trim();
+        if (text.length >= 20) out.push(text);
+      } catch {
+        // cross-origin frame navigated/detached mid-read; skip it
+      }
+    }
+    return out;
   }
 
   static checkContent(page, content) {

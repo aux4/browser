@@ -61,8 +61,65 @@ export class BlocksBuilder {
     const maxBlockChars = parseInt(options.maxBlockChars) || 1500;
     const includeNav = options.includeNav === true || options.includeNav === "true";
 
-    return page.evaluate(
-      ({ interactiveRoles, componentRoles, navTags, navRoles, skipTags, candidateSelector, maxBlockChars, includeNav }) => {
+    const args = {
+        interactiveRoles: INTERACTIVE_ROLES,
+        componentRoles: COMPONENT_ROLES,
+        navTags: [...NAV_TAGS],
+        navRoles: [...NAV_ROLES],
+        skipTags: [...SKIP_SUBTREE_TAGS],
+        candidateSelector: CANDIDATE_SELECTOR,
+        maxBlockChars,
+        includeNav
+    };
+    const result = await page.evaluate(collectBlocks, args);
+
+    // Content rendered inside visible child frames (same- or cross-origin):
+    // their blocks follow the page's own, tagged with `frame` (the frame URL)
+    // and without a ref — refs only address the top document; act inside a
+    // frame with --within.
+    const frames = await visibleChildFrames(page);
+    for (const frame of frames) {
+      let frameResult;
+      try {
+        frameResult = await withTimeout(frame.evaluate(collectBlocks, { ...args, isFrame: true }), 5000);
+      } catch {
+        continue;
+      }
+      if (!frameResult || !frameResult.blocks.length) continue;
+      for (const block of frameResult.blocks) {
+        result.blocks.push({ ...block, id: `b${result.blocks.length + 1}`, ref: null, offset: null, frame: frame.url() });
+      }
+    }
+    result.blockCount = result.blocks.length;
+    return result;
+  }
+}
+
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms))]);
+}
+
+// Child frames whose <iframe> element is visible and at least 100x50 —
+// tracking pixels, storage bridges and hidden analytics frames are skipped.
+export async function visibleChildFrames(page) {
+  const out = [];
+  for (const frame of page.frames()) {
+    if (frame === page.mainFrame()) continue;
+    if (frame.parentFrame() !== page.mainFrame()) continue;
+    try {
+      const element = await frame.frameElement();
+      const box = await element.boundingBox();
+      await element.dispose();
+      if (!box || box.width < 100 || box.height < 50) continue;
+      out.push(frame);
+    } catch {
+      // detached while inspecting
+    }
+  }
+  return out;
+}
+
+function collectBlocks({ interactiveRoles, componentRoles, navTags, navRoles, skipTags, candidateSelector, maxBlockChars, includeNav }) {
         const norm = (s) => (s || "").replace(/\s+/g, " ").trim();
 
         const isVisible = (el) => {
@@ -121,7 +178,7 @@ export class BlocksBuilder {
         const allRefRoles = [...interactiveRoles, ...componentRoles];
         const refMap = new Map();
         let refCounter = 0;
-        for (const el of document.querySelectorAll("*")) {
+        for (const el of (() => { const out = []; const walk = (root) => { for (const el of root.querySelectorAll("*")) { out.push(el); if (el.shadowRoot) walk(el.shadowRoot); } }; walk(document); return out; })()) {
           const role = el.getAttribute("role") || implicitRole(el);
           if (!role || !allRefRoles.includes(role)) continue;
           if (!isVisible(el)) continue;
@@ -178,7 +235,7 @@ export class BlocksBuilder {
         // script/style/template/iframe/svg, hidden elements, and (unless
         // includeNav) nav/footer/aside/header landmarks; track a heading
         // stack; emit a block for every visible, leaf candidate element.
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT, {
+        const makeWalker = (root) => document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
           acceptNode(node) {
             const tag = node.tagName.toLowerCase();
             if (skipTags.includes(tag)) return NodeFilter.FILTER_REJECT;
@@ -190,10 +247,26 @@ export class BlocksBuilder {
 
         const headingStack = [];
         const blocks = [];
-        let node;
         let seq = 0;
+        if (!document.body) return { url: location.href, title: document.title, blockCount: 0, blocks };
 
-        while ((node = walker.nextNode())) {
+        // Open shadow roots are walked right after their host (same order
+        // as the ref walk), so web-component content becomes blocks too.
+        const walkers = [makeWalker(document.body)];
+        const nextNode = () => {
+          while (walkers.length) {
+            const n = walkers[walkers.length - 1].nextNode();
+            if (n) {
+              if (n.shadowRoot) walkers.push(makeWalker(n.shadowRoot));
+              return n;
+            }
+            walkers.pop();
+          }
+          return null;
+        };
+        let node;
+
+        while ((node = nextNode())) {
           const tag = node.tagName.toLowerCase();
 
           if (HEADING_LEVEL[tag]) {
@@ -209,7 +282,7 @@ export class BlocksBuilder {
           if (!isVisible(node)) continue;
           if (!isLeafCandidate(node)) continue;
 
-          let text = norm(node.textContent);
+          let text = norm(node.shadowRoot ? node.shadowRoot.textContent + " " + node.textContent : node.textContent);
           if (!text) continue;
 
           const truncated = text.length > maxBlockChars;
@@ -253,17 +326,4 @@ export class BlocksBuilder {
           blockCount: blocks.length,
           blocks
         };
-      },
-      {
-        interactiveRoles: INTERACTIVE_ROLES,
-        componentRoles: COMPONENT_ROLES,
-        navTags: [...NAV_TAGS],
-        navRoles: [...NAV_ROLES],
-        skipTags: [...SKIP_SUBTREE_TAGS],
-        candidateSelector: CANDIDATE_SELECTOR,
-        maxBlockChars,
-        includeNav
-      }
-    );
-  }
 }

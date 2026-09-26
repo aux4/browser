@@ -9,6 +9,9 @@ The `markdown` and `text` formats return only readable page text:
 - **No code or data** — `<script>`, `<style>`, `<noscript>`, `<template>`, `<iframe>` and `<svg>` content, JSON-LD and embedded JSON data blobs are dropped (the same skip rules as `browser blocks`)
 - **Main content first** — when the page has a main landmark (`<main>` or `role="main"`), its content comes first, then a `---` line, then the rest of the page (header, navigation, footer)
 - **Links kept** — links that span several lines still come out as `[label](href)`
+- **Web components** — text inside open shadow roots is included where it renders
+- **Frames** — the readable text of every visible child frame (at least 100x50 px; tracking pixels and hidden frames are skipped) follows the page's own content after a `---` line
+- **Rendered content** — after navigating, the read waits up to 8 seconds (`AUX4_BROWSER_CONTENT_WAIT` ms on the daemon, `0` disables) for a single-page app to show rendered text; a static page with no scripts returns immediately
 
 The `html` format returns the raw HTML unchanged.
 

@@ -9,6 +9,7 @@ import { ComponentResolver } from "../lib/ComponentResolver.js";
 import { BrowserEngine } from "./BrowserEngine.js";
 import { ProviderBridge } from "./ProviderBridge.js";
 import { fingerprintSessionId } from "../lib/Redact.js";
+import { resolveUserAgent, browserUserAgent, applyUserAgentToContext } from "../lib/UserAgent.js";
 
 import { ARTIFACTS_DIR } from "../lib/Paths.js";
 
@@ -129,6 +130,7 @@ export class SessionManager {
 
     const providerBrowser = await BrowserEngine.connect(wsUrl, headers || {});
     const context = providerBrowser.contexts()[0] || await providerBrowser.newContext();
+    await this._applyRemoteUserAgent(providerBrowser, context);
     const page = context.pages()[0] || await context.newPage();
 
     const timeout = this.parseTimeout("10m");
@@ -202,12 +204,72 @@ export class SessionManager {
 
   async _navigate(page, url, waitUntil) {
     const strategy = waitUntil || "load";
+    let response;
     if (strategy === "settle") {
-      const response = await page.goto(url, { waitUntil: "domcontentloaded" });
+      response = await page.goto(url, { waitUntil: "domcontentloaded" });
       await this._waitForSettle(page);
-      return response;
+    } else {
+      response = await page.goto(url, { waitUntil: strategy });
     }
-    return page.goto(url, { waitUntil: strategy });
+    if (strategy !== "commit") await this._waitForContent(page);
+    return response;
+  }
+
+  // Single-page apps often reach "load" with an empty <body> and render a
+  // few seconds later (their API calls are still in flight). Wait until the
+  // page shows some rendered text — in the main document, an open shadow
+  // root or a child frame — capped (AUX4_BROWSER_CONTENT_WAIT ms, default
+  // 8000; 0 disables). A static page with no scripts that is genuinely empty
+  // returns immediately.
+  async _waitForContent(page) {
+    const raw = process.env.AUX4_BROWSER_CONTENT_WAIT;
+    const cap = raw === undefined || raw === "" ? 8000 : parseInt(raw);
+    if (!cap || cap <= 0) return;
+    const hasContent = () => {
+      const body = document.body;
+      if (!body) return false;
+      if ((body.innerText || "").trim().length > 0) return true;
+      const hosts = [...document.querySelectorAll("*")].filter(el => el.shadowRoot);
+      if (hosts.some(el => (el.shadowRoot.textContent || "").trim().length > 0)) return true;
+      if (document.querySelector("iframe")) return "frames";
+      if (!document.querySelector("script")) return "static";
+      return false;
+    };
+    const deadline = Date.now() + cap;
+    try {
+      while (Date.now() < deadline) {
+        const state = await page.evaluate(hasContent).catch(() => false);
+        if (state === true || state === "static") return;
+        if (state === "frames") {
+          for (const frame of page.frames()) {
+            if (frame === page.mainFrame()) continue;
+            const text = await frame.evaluate(() => (document.body?.innerText || "").trim().length).catch(() => 0);
+            if (text > 0) return;
+          }
+        }
+        await page.waitForTimeout(250);
+      }
+    } catch {
+      // navigation in progress / page closed; content wait is best-effort
+    }
+  }
+
+  // User agent for new local contexts (see UserAgent.js): the local browser's
+  // own UA normalized (HeadlessChrome -> Chrome) unless configured otherwise.
+  async _localUserAgent(localBrowser) {
+    if (this._localUserAgentCache === undefined) {
+      const own = await browserUserAgent(localBrowser);
+      this._localUserAgentCache = own ? resolveUserAgent(own) : resolveUserAgent("", process.env.AUX4_BROWSER_USER_AGENT);
+    }
+    return this._localUserAgentCache;
+  }
+
+  // Provider-backed sessions reuse the provider's default context, so the UA
+  // is overridden per page over CDP on every (re)attach.
+  async _applyRemoteUserAgent(providerBrowser, context) {
+    const own = await browserUserAgent(providerBrowser);
+    const userAgent = resolveUserAgent(own || "");
+    if (userAgent) await applyUserAgentToContext(context, userAgent);
   }
 
   async _waitForSettle(page, quietMs = 300) {
@@ -283,6 +345,7 @@ export class SessionManager {
       // reattach across process invocations.
       context = providerBrowser.contexts()[0];
       if (!context) context = await providerBrowser.newContext();
+      await this._applyRemoteUserAgent(providerBrowser, context);
       page = context.pages()[0];
       if (!page) page = await context.newPage();
       id = encodeSessionId(provider, opened.token);
@@ -299,6 +362,8 @@ export class SessionManager {
         contextOptions.recordVideo = { dir: videoDir };
       }
       const localBrowser = await this.getLocalBrowser();
+      const userAgent = await this._localUserAgent(localBrowser);
+      if (userAgent) contextOptions.userAgent = userAgent;
       context = await localBrowser.newContext(contextOptions);
       page = await context.newPage();
       id = crypto.randomUUID().slice(0, 8);
@@ -515,7 +580,7 @@ export class SessionManager {
       };
       const allRoles = [...INTERACTIVE_ROLES, ...COMPONENT_ROLES];
       let ref = 0;
-      for (const el of document.querySelectorAll("*")) {
+      for (const el of (() => { const out = []; const walk = (root) => { for (const el of root.querySelectorAll("*")) { out.push(el); if (el.shadowRoot) walk(el.shadowRoot); } }; walk(document); return out; })()) {
         const role = el.getAttribute("role") || implicitRole(el);
         if (!role || !allRoles.includes(role)) continue;
         if (!isVisible(el)) continue;
@@ -580,7 +645,7 @@ export class SessionManager {
         };
         const allRoles = [...INTERACTIVE_ROLES, ...COMPONENT_ROLES];
         let ref = 0;
-        for (const el of document.querySelectorAll("*")) {
+        for (const el of (() => { const out = []; const walk = (root) => { for (const el of root.querySelectorAll("*")) { out.push(el); if (el.shadowRoot) walk(el.shadowRoot); } }; walk(document); return out; })()) {
           const role = el.getAttribute("role") || implicitRole(el);
           if (!role || !allRoles.includes(role)) continue;
           if (!isVisible(el)) continue;

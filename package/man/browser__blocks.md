@@ -24,6 +24,12 @@ Each block in the returned array has this shape:
       tag           lowercase tag name of the block's element
     }
 
+Web components and frames:
+
+- **Open shadow roots** are walked right after their host element, so web-component content becomes blocks in page order.
+- **Visible child frames** (at least 100x50 px) contribute their blocks after the page's own, each with an extra `frame` field (the frame URL) and `ref: null` — use `--within` to act inside a frame.
+- With `--url`, the command waits up to 8 seconds for a single-page app to render text before walking the page.
+
 Block selection:
 
 - **Candidate elements**: headings (`h1`-`h6`), `p`, `li`, `dd`, `dt`, `figcaption`, `blockquote`, `pre`, `tr`, `article`, `section`.
