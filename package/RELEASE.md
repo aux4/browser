@@ -2,6 +2,7 @@
 
 ## 1.0.30
 
+- New `actions` command: every control a person could use on the page (fields, buttons, links, options, clickable elements with no role such as suggestion items and cards), in open shadow roots and visible iframes, with label, value, context (dialog/landmark, heading path), the snapshot `ref` when it has one and an exact `selector` (+ `within`). `--includeNav`, `--within`, `--page`.
 - `type`, `select`, `check` and `uncheck` accept `--selector <css>` (reaches elements inside open shadow roots) and `--within <iframe-css>`, so an element found by a page script can be acted on exactly.
 - `eval --within <iframe-css>` runs the script inside a frame's document (cross-origin frames included; nest with `>>>`).
 

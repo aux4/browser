@@ -170,6 +170,7 @@ export class DaemonServer {
       case "component": return this.sessionManager.component(params.session, params);
       case "snapshot": return this.sessionManager.snapshot(params.session, params);
       case "blocks": return this.sessionManager.blocks(params.session, params);
+      case "actions": return this.sessionManager.actions(params.session, params);
       case "stop":
         setTimeout(() => this.stop(), 100);
         return { status: "stopping" };

@@ -1482,6 +1482,37 @@
           }
         },
         {
+          "name": "actions",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs actions values(session,within,includeNav,page)"
+          ],
+          "help": {
+            "text": "List every control a person could use on the current page (fields, buttons, links, options, clickable elements with no role) with label, value, context and how to act on it",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID",
+                "required": true
+              },
+              {
+                "name": "within",
+                "text": "Only this iframe (CSS selector; nest with >>>)",
+                "default": ""
+              },
+              {
+                "name": "includeNav",
+                "text": "Include controls in header/nav/footer/aside landmarks (skipped by default)",
+                "default": "false"
+              },
+              {
+                "name": "page",
+                "text": "Also return the page's headings, visible error messages, the start of its main text and its text blocks",
+                "default": "false"
+              }
+            ]
+          }
+        },
+        {
           "name": "mock-open",
           "private": true,
           "execute": [

@@ -324,6 +324,19 @@ aux4 browser set-snapshot --session <id> --mode off
 
 Modes: `off` (default), `auto` (~50 elements), `full` (all elements).
 
+### Actions (every control on the page)
+
+`actions` lists every control a person could use on the page — fields, buttons, links, options and clickable
+elements with no role (suggestion items, cards), inside open shadow roots and visible iframes too — with its label,
+current value, context (dialog/landmark and heading path), the snapshot `ref` when it has one and a `selector`
+(+ `within` for iframes) that addresses it exactly. Page chrome (header/nav/footer/aside) is skipped unless
+`--includeNav true`; `--page true` adds the page's headings, error messages and text.
+
+```bash
+aux4 browser actions --session $SESSION
+aux4 browser click-selector --session $SESSION --selector '[data-aux4-el="3"]'
+```
+
 ### Content Blocks
 
 Split the current page into content blocks — headings, paragraphs, list items, article/figure cards, table rows — via a single deterministic DOM walk (no AI). Each block carries `text`, `heading`/`headingPath`, `url` (nearest/enclosing link href), a stable CSS `selector`, a page-order `offset`, and a snapshot `ref` when the block or its nearest ancestor is itself click-able. This is the recommended way to feed page content to a ranker (e.g. `aux4 classify rank`) or an agent — unlike a markdown dump, it never loses the `href` on containers that wrap other content in a link (e.g. an article card).

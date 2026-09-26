@@ -38,6 +38,7 @@ import { ComponentCommand } from "../commands/ComponentCommand.js";
 import { SnapshotCommand } from "../commands/SnapshotCommand.js";
 import { ReadCommand } from "../commands/ReadCommand.js";
 import { BlocksCommand } from "../commands/BlocksCommand.js";
+import { ActionsCommand } from "../commands/ActionsCommand.js";
 
 const args = process.argv.slice(2);
 const action = args[0];
@@ -86,6 +87,7 @@ const commands = {
   component:   { handler: ComponentCommand, args: ["session", "type", "action", "name", "row", "col", "where", "item", "field", "fields", "value", "tab", "path", "title", "timeout"] },
   snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format", "output"] },
   blocks:      { handler: BlocksCommand,   args: ["session", "url", "waitUntil", "maxBlockChars", "includeNav"] },
+  actions:     { handler: ActionsCommand,  args: ["session", "within", "includeNav", "page"] },
   "new-tab":   { handler: NewTabCommand,   args: ["session", "url"] },
   "switch-tab": { handler: SwitchTabCommand, args: ["session", "tab"] },
   "close-tab": { handler: CloseTabCommand, args: ["session", "tab"] },
