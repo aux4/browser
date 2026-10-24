@@ -7,7 +7,8 @@ export async function ReadCommand(params) {
     session: params.session,
     format: params.format,
     waitUntil: params.waitUntil,
-    output: params.output
+    output: params.output,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }

@@ -1914,6 +1914,82 @@ class SessionManager {
     }
   }
 
+  // BRW-009: how long a page-reading command (read/content/actions/snapshot/
+  // blocks) or an after-action report (click/fill/type/select/check) will
+  // wait for the page to settle before returning. Explicit --wait wins,
+  // then AUX4_BROWSER_SETTLE_WAIT, then a 5s default. Generic — no
+  // framework-specific knowledge (htmx, SPA frameworks, etc).
+  _settleTimeout(wait) {
+    if (wait != null && wait !== "") {
+      const parsed = parseInt(wait);
+      if (!isNaN(parsed)) return parsed;
+    }
+    const raw = process.env.AUX4_BROWSER_SETTLE_WAIT;
+    if (raw !== undefined && raw !== "") {
+      const parsed = parseInt(raw);
+      if (!isNaN(parsed)) return parsed;
+    }
+    return 5000;
+  }
+
+  // Waits for the page to go quiet on two independent signals — no in-flight
+  // network requests for `quietMs`, AND no DOM mutations for `quietMs` —
+  // bounded by `timeoutMs` overall. A static page that is already quiet on
+  // both returns almost immediately (fast path); a page still loading
+  // content asynchronously (fetch-after-delay, htmx hx-get on load, any SPA
+  // render) is given up to `timeoutMs` to finish before giving up. Generic:
+  // reacts only to real network/DOM activity, no per-framework special-casing.
+  async _waitForPageSettle(page, options = {}) {
+    const timeoutMs = options.timeoutMs != null ? options.timeoutMs : this._settleTimeout();
+    const quietMs = options.quietMs != null ? options.quietMs : 500;
+    if (!timeoutMs || timeoutMs <= 0) return;
+    const deadline = Date.now() + timeoutMs;
+    const remaining = () => Math.max(deadline - Date.now(), 0);
+
+    const networkIdle = new Promise((resolve) => {
+      let inflight = 0;
+      let timer = null;
+      const cleanup = () => {
+        page.off("request", onRequest);
+        page.off("requestfinished", onDone);
+        page.off("requestfailed", onDone);
+      };
+      const finish = () => { cleanup(); resolve(); };
+      const schedule = () => {
+        clearTimeout(timer);
+        if (inflight <= 0) timer = setTimeout(finish, quietMs);
+      };
+      const onRequest = () => { inflight++; clearTimeout(timer); };
+      const onDone = () => { inflight = Math.max(0, inflight - 1); schedule(); };
+      page.on("request", onRequest);
+      page.on("requestfinished", onDone);
+      page.on("requestfailed", onDone);
+      schedule();
+    }).catch(() => {});
+
+    const domQuiet = page.evaluate((ms) => {
+      return new Promise((resolve) => {
+        let timer = setTimeout(resolve, ms);
+        try {
+          const observer = new MutationObserver(() => {
+            clearTimeout(timer);
+            timer = setTimeout(() => { observer.disconnect(); resolve(); }, ms);
+          });
+          observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true });
+        } catch {
+          resolve();
+        }
+      });
+    }, quietMs).catch(() => {});
+
+    const bounded = (p) => Promise.race([p, new Promise((resolve) => setTimeout(resolve, remaining()))]);
+    try {
+      await Promise.all([bounded(networkIdle), bounded(domQuiet)]);
+    } catch {
+      // best-effort: a page navigation/close mid-wait should never fail the caller
+    }
+  }
+
   _pageInfo(page, response) {
     const info = { finalUrl: page.url() };
     if (response) {
@@ -2063,10 +2139,11 @@ class SessionManager {
   // any visible validation/error text right after the action — so an agent
   // acting by label knows immediately whether the click navigated, a submit
   // showed a validation error, or nothing visibly happened.
-  async _afterAction(session, extra = {}) {
+  async _afterAction(session, extra = {}, wait) {
     let info = null;
     try {
       const page = session.pages[session.activeTab];
+      await this._waitForPageSettle(page, { timeoutMs: this._settleTimeout(wait) });
       info = await page.evaluate(() => {
         const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
         const errs = [];
@@ -2142,7 +2219,7 @@ class SessionManager {
       for (const [name, value] of Object.entries(fields)) {
         await this._fillComponentField(base.getByLabel(name), name, value, timeout);
       }
-      return this._afterAction(session, { filled: Object.keys(fields).length });
+      return this._afterAction(session, { filled: Object.keys(fields).length }, params.wait);
     }
 
     if (!params.field) {
@@ -2152,7 +2229,7 @@ class SessionManager {
       throw new Error(`fill: --value is required for field "${params.field}"`);
     }
     await this._fillComponentField(base.getByLabel(params.field), params.field, params.value, timeout);
-    return this._afterAction(session, { filled: 1 });
+    return this._afterAction(session, { filled: 1 }, params.wait);
   }
 
   async screenshotOnError(session) {
@@ -2289,10 +2366,10 @@ class SessionManager {
     return this._attachSnapshot(session, { status: "ok", url: page.url() });
   }
 
-  async _clickWithTimeout(session, locator, timeout, description) {
+  async _clickWithTimeout(session, locator, timeout, description, wait) {
     try {
       await locator.click({ timeout });
-      return this._afterAction(session);
+      return this._afterAction(session, {}, wait);
     } catch (e) {
       if (e.message && e.message.includes("Timeout")) {
         const page = session.pages[session.activeTab];
@@ -2434,21 +2511,21 @@ class SessionManager {
         return false;
       }, ref);
       if (!clicked) throw new Error(`Snapshot ref [${ref}] not found on page`);
-      return this._afterAction(session);
+      return this._afterAction(session, {}, params.wait);
     }
 
     const base = this.getBase(session, params);
     const role = params.role || "button";
     const locator = base.getByRole(role, { name: params.name });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
-    return this._clickWithTimeout(session, locator.nth(index), timeout, `role=${role} name="${params.name}"`);
+    return this._clickWithTimeout(session, locator.nth(index), timeout, `role=${role} name="${params.name}"`, params.wait);
   }
 
   async clickSelector(sessionId, params) {
     const session = await this.resolveSession(sessionId);
     const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
-    return this._clickWithTimeout(session, base.locator(params.selector).first(), timeout, `selector="${params.selector}"`);
+    return this._clickWithTimeout(session, base.locator(params.selector).first(), timeout, `selector="${params.selector}"`, params.wait);
   }
 
   // Drive the real mouse via CDP at viewport coordinates, with a human-like
@@ -2494,7 +2571,7 @@ class SessionManager {
     const locator = base.getByText(params.text, { exact: false });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
     const timeout = parseInt(params.timeout) || 5000;
-    return this._clickWithTimeout(session, locator.nth(index), timeout, `text="${params.text}"`);
+    return this._clickWithTimeout(session, locator.nth(index), timeout, `text="${params.text}"`, params.wait);
   }
 
   async type(sessionId, params) {
@@ -2502,18 +2579,18 @@ class SessionManager {
     if (params.selector) {
       // CSS selector (pierces open shadow roots; --within for iframes)
       await this.getBase(session, params).locator(params.selector).first().fill(params.value, { timeout: parseInt(params.timeout) || 5000 });
-      return this._afterAction(session);
+      return this._afterAction(session, {}, params.wait);
     }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.fill(params.value);
       await element.dispose();
-      return this._afterAction(session);
+      return this._afterAction(session, {}, params.wait);
     }
     const base = this.getBase(session, params);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).fill(params.value);
-    return this._afterAction(session);
+    return this._afterAction(session, {}, params.wait);
   }
 
   async scroll(sessionId, params) {
@@ -2537,6 +2614,7 @@ class SessionManager {
   async content(sessionId, params) {
     const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
+    await this._waitForPageSettle(page, { timeoutMs: this._settleTimeout(params.wait) });
     const result = await ContentExtractor.extract(page, params);
 
     if (params.output) {
@@ -2575,6 +2653,7 @@ class SessionManager {
     const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const response = await this._navigate(page, url, waitUntil);
+    await this._waitForPageSettle(page, { timeoutMs: this._settleTimeout(params.wait) });
     const info = await this._pageInfoAsync(page, response);
     const extracted = await ContentExtractor.extract(page, { format });
     const content = extracted.content;
@@ -2766,7 +2845,7 @@ class SessionManager {
       } finally {
         await element.dispose();
       }
-      return this._afterAction(session);
+      return this._afterAction(session, {}, params.wait);
     }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
@@ -2775,7 +2854,7 @@ class SessionManager {
       } finally {
         await element.dispose();
       }
-      return this._afterAction(session);
+      return this._afterAction(session, {}, params.wait);
     }
     const base = this.getBase(session, params);
     const role = params.role || "combobox";
@@ -2786,7 +2865,7 @@ class SessionManager {
     } finally {
       await element.dispose();
     }
-    return this._afterAction(session);
+    return this._afterAction(session, {}, params.wait);
   }
 
   // A native <select> takes selectOption. A custom combobox (a div/mat-select/
@@ -2842,36 +2921,36 @@ class SessionManager {
     const session = await this.resolveSession(sessionId);
     if (params.selector) {
       await this.getBase(session, params).locator(params.selector).first().check({ timeout: parseInt(params.timeout) || 5000 });
-      return this._afterAction(session);
+      return this._afterAction(session, {}, params.wait);
     }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.check({ timeout: parseInt(params.timeout) || 5000 });
       await element.dispose();
-      return this._afterAction(session);
+      return this._afterAction(session, {}, params.wait);
     }
     const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
-    return this._afterAction(session);
+    return this._afterAction(session, {}, params.wait);
   }
 
   async uncheck(sessionId, params) {
     const session = await this.resolveSession(sessionId);
     if (params.selector) {
       await this.getBase(session, params).locator(params.selector).first().uncheck({ timeout: parseInt(params.timeout) || 5000 });
-      return this._afterAction(session);
+      return this._afterAction(session, {}, params.wait);
     }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.uncheck({ timeout: parseInt(params.timeout) || 5000 });
       await element.dispose();
-      return this._afterAction(session);
+      return this._afterAction(session, {}, params.wait);
     }
     const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
-    return this._afterAction(session);
+    return this._afterAction(session, {}, params.wait);
   }
 
   async hover(sessionId, params) {
@@ -3145,7 +3224,7 @@ class SessionManager {
       }
       case "click": {
         await locator.first().click({ timeout });
-        return this._afterAction(session);
+        return this._afterAction(session, {}, params.wait);
       }
       case "hover": {
         await locator.first().hover({ timeout });
@@ -3192,11 +3271,11 @@ class SessionManager {
           for (const [name, value] of Object.entries(fields)) {
             await this._fillComponentField(locator.getByLabel(name), name, value, timeout);
           }
-          return this._afterAction(session, { filled: Object.keys(fields).length });
+          return this._afterAction(session, { filled: Object.keys(fields).length }, params.wait);
         }
         if (params.value != null) {
           await this._fillComponentField(locator, params.field || params.name || type, params.value, timeout);
-          return this._afterAction(session);
+          return this._afterAction(session, {}, params.wait);
         }
         throw new Error("component fill: provide --fields (json) or --value");
       }
@@ -3213,6 +3292,7 @@ class SessionManager {
     const session = await this.resolveSession(sessionId);
     const mode = params.mode || "auto";
     const page = session.pages[session.activeTab];
+    await this._waitForPageSettle(page, { timeoutMs: this._settleTimeout(params.wait) });
     const snapshot = await SnapshotBuilder.build(page, mode);
 
     if (params.output) {
@@ -3245,6 +3325,7 @@ class SessionManager {
   async actions(sessionId, params = {}) {
     const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
+    await this._waitForPageSettle(page, { timeoutMs: this._settleTimeout(params.wait) });
     const result = await ActionsBuilder.build(page, params);
     return { status: "ok", ...result };
   }
@@ -3256,6 +3337,7 @@ class SessionManager {
     if (params.url) {
       await this._navigate(page, params.url, params.waitUntil || "load");
     }
+    await this._waitForPageSettle(page, { timeoutMs: this._settleTimeout(params.wait) });
 
     const result = await BlocksBuilder.build(page, {
       maxBlockChars: params.maxBlockChars,
@@ -3837,7 +3919,8 @@ async function ClickCommand(params) {
     role: params.role,
     index: params.index,
     ref: params.ref,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -3847,7 +3930,8 @@ async function ClickSelectorCommand(params) {
   const result = await client.send("click-selector", {
     session: params.session,
     selector: params.selector,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -3872,7 +3956,8 @@ async function ClickTextCommand(params) {
     session: params.session,
     text: params.text,
     index: params.index,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -3929,7 +4014,8 @@ async function TypeCommand(params) {
       role: params.role,
       ref: params.ref,
       within: params.within,
-      selector: params.selector
+      selector: params.selector,
+      wait: params.wait
     });
   }
   console.log(JSON.stringify(result));
@@ -3952,7 +4038,8 @@ async function ContentCommand(params) {
     session: params.session,
     selector: params.selector,
     format: params.format,
-    output: params.output
+    output: params.output,
+    wait: params.wait
   });
   if (params.output) {
     console.log(JSON.stringify(result));
@@ -4101,7 +4188,8 @@ async function SelectCommand(params) {
     role: params.role,
     ref: params.ref,
     selector: params.selector,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -4114,7 +4202,8 @@ async function CheckCommand(params) {
     role: params.role,
     ref: params.ref,
     selector: params.selector,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -4127,7 +4216,8 @@ async function UncheckCommand(params) {
     role: params.role,
     ref: params.ref,
     selector: params.selector,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -4215,7 +4305,8 @@ async function ComponentCommand(params) {
     tab: params.tab,
     path: params.path,
     title: params.title,
-    timeout: params.timeout
+    timeout: params.timeout,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -4228,7 +4319,8 @@ async function FillCommand(params) {
     value: params.value,
     fields: params.fields,
     within: params.within,
-    timeout: params.timeout
+    timeout: params.timeout,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -4239,7 +4331,8 @@ async function SnapshotCommand(params) {
     session: params.session,
     mode: params.mode,
     format: params.format,
-    output: params.output
+    output: params.output,
+    wait: params.wait
   });
   if (params.output) {
     console.log(JSON.stringify(result));
@@ -4257,7 +4350,8 @@ async function ReadCommand(params) {
     session: params.session,
     format: params.format,
     waitUntil: params.waitUntil,
-    output: params.output
+    output: params.output,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -4269,7 +4363,8 @@ async function BlocksCommand(params) {
     url: params.url,
     waitUntil: params.waitUntil,
     maxBlockChars: params.maxBlockChars,
-    includeNav: params.includeNav
+    includeNav: params.includeNav,
+    wait: params.wait
   });
   console.log(JSON.stringify(result.blocks || []));
 }
@@ -4280,7 +4375,8 @@ async function ActionsCommand(params) {
     session: params.session,
     within: params.within,
     includeNav: params.includeNav,
-    page: params.page
+    page: params.page,
+    wait: params.wait
   });
   delete result.status;
   console.log(JSON.stringify(result));
@@ -4300,16 +4396,16 @@ const commands = {
   back:        { handler: BackCommand,     args: ["session"] },
   forward:     { handler: ForwardCommand,  args: ["session"] },
   reload:      { handler: ReloadCommand,   args: ["session"] },
-  click:       { handler: ClickCommand,    args: ["session", "name", "role", "index", "ref", "within"] },
-  "click-selector": { handler: ClickSelectorCommand, args: ["session", "selector", "within"] },
+  click:       { handler: ClickCommand,    args: ["session", "name", "role", "index", "ref", "within", "wait"] },
+  "click-selector": { handler: ClickSelectorCommand, args: ["session", "selector", "within", "wait"] },
   mouse:       { handler: MouseCommand,    args: ["session", "action", "x", "y", "steps", "selector", "within"] },
-  "click-text": { handler: ClickTextCommand, args: ["session", "text", "index", "within"] },
+  "click-text": { handler: ClickTextCommand, args: ["session", "text", "index", "within", "wait"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
-  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "ref", "within", "selector"] },
+  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "ref", "within", "selector", "wait"] },
   scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount", "to"] },
-  content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output"] },
+  content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output", "wait"] },
   screenshot:  { handler: ScreenshotCommand, args: ["session", "output", "fullPage"] },
-  read:        { handler: ReadCommand,     args: ["url", "session", "format", "waitUntil", "output"] },
+  read:        { handler: ReadCommand,     args: ["url", "session", "format", "waitUntil", "output", "wait"] },
   wait:        { handler: WaitCommand,     args: ["session", "selector", "timeout"] },
   eval:        { handler: EvalCommand,     args: ["session", "script", "within"] },
   expect:      { handler: ExpectCommand,  args: ["session", "selector", "assertion", "expected", "timeout"] },
@@ -4320,9 +4416,9 @@ const commands = {
   "state-load": { handler: StateLoadCommand, args: ["session", "file"] },
   download:    { handler: DownloadCommand, args: ["session", "url", "output"] },
   "save-pdf":  { handler: SavePdfCommand,  args: ["session", "output", "format", "printBackground"] },
-  select:      { handler: SelectCommand,   args: ["session", "name", "value", "role", "ref", "selector", "within"] },
-  check:       { handler: CheckCommand,    args: ["session", "name", "role", "ref", "selector", "within"] },
-  uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role", "ref", "selector", "within"] },
+  select:      { handler: SelectCommand,   args: ["session", "name", "value", "role", "ref", "selector", "within", "wait"] },
+  check:       { handler: CheckCommand,    args: ["session", "name", "role", "ref", "selector", "within", "wait"] },
+  uncheck:     { handler: UncheckCommand,  args: ["session", "name", "role", "ref", "selector", "within", "wait"] },
   hover:       { handler: HoverCommand,    args: ["session", "name", "role"] },
   press:       { handler: PressCommand,    args: ["session", "key", "selector"] },
   clear:       { handler: ClearCommand,    args: ["session", "name", "role"] },
@@ -4330,11 +4426,11 @@ const commands = {
   "set-scope": { handler: SetScopeCommand, args: ["session", "selector"] },
   "clear-scope": { handler: ClearScopeCommand, args: ["session"] },
   "set-snapshot": { handler: SetSnapshotCommand, args: ["session", "mode"] },
-  component:   { handler: ComponentCommand, args: ["session", "type", "action", "name", "row", "col", "where", "item", "field", "fields", "value", "tab", "path", "title", "timeout"] },
-  fill:        { handler: FillCommand,     args: ["session", "field", "value", "fields", "within", "timeout"] },
-  snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format", "output"] },
-  blocks:      { handler: BlocksCommand,   args: ["session", "url", "waitUntil", "maxBlockChars", "includeNav"] },
-  actions:     { handler: ActionsCommand,  args: ["session", "within", "includeNav", "page"] },
+  component:   { handler: ComponentCommand, args: ["session", "type", "action", "name", "row", "col", "where", "item", "field", "fields", "value", "tab", "path", "title", "timeout", "wait"] },
+  fill:        { handler: FillCommand,     args: ["session", "field", "value", "fields", "within", "timeout", "wait"] },
+  snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format", "output", "wait"] },
+  blocks:      { handler: BlocksCommand,   args: ["session", "url", "waitUntil", "maxBlockChars", "includeNav", "wait"] },
+  actions:     { handler: ActionsCommand,  args: ["session", "within", "includeNav", "page", "wait"] },
   "new-tab":   { handler: NewTabCommand,   args: ["session", "url"] },
   "switch-tab": { handler: SwitchTabCommand, args: ["session", "tab"] },
   "close-tab": { handler: CloseTabCommand, args: ["session", "tab"] },

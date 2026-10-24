@@ -13,16 +13,23 @@ Each element has a `ref` number stable within the snapshot. Use `browser click -
 
 Elements inside open shadow roots (web components) are included and get refs like any other element. Elements inside iframes are not; when the page has visible frames (at least 100x50 px), the snapshot adds a `frames` list with each frame's `url` and a `within` selector to pass as `--within` to act inside it.
 
+Before building the snapshot, waits for the page to settle — no in-flight network requests AND no DOM mutations
+for 500ms, bounded by `--wait` (default 5000ms, or `AUX4_BROWSER_SETTLE_WAIT` on the daemon) — so elements added
+by content that finishes loading after the page already shows some placeholder text (a delayed `fetch`, an htmx
+`hx-get`/`hx-trigger="load"`, any async render) are included instead of being missed. A page that is already
+settled returns almost immediately.
+
 #### Usage
 
 ```bash
-aux4 browser snapshot --session <id> [--mode auto] [--format json] [--output <path>]
+aux4 browser snapshot --session <id> [--mode auto] [--format json] [--output <path>] [--wait <ms>]
 ```
 
     --session   Session ID (required)
     --mode      Snapshot mode: auto, full (default: auto)
     --format    Output format: json, text (default: json)
     --output    Write snapshot to file. Returns {path, title, elementCount, componentCount} for cheap triage
+    --wait      Max time to wait for the page to settle before returning, in ms (default: 5000, or AUX4_BROWSER_SETTLE_WAIT)
 
 #### Example
 

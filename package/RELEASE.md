@@ -1,5 +1,20 @@
 # Release notes
 
+## 1.0.35
+
+Page-settle wait (BRW-009): a page that renders its real content after the load event — a delayed `fetch`, an
+htmx-style `hx-get`/`hx-trigger="load"`, any async render — used to leave `read`/`content`/`actions`/`snapshot`/
+`blocks` and the after-action report of `click`/`fill`/`type`/`select`/`check`/`uncheck`/`component` returning
+the page's initial placeholder instead of its real content.
+
+- All of the above now wait for the page to go quiet on two independent signals — no in-flight network requests
+  AND no DOM mutations for a short quiet window (500ms) — before reading the page, bounded by an overall timeout
+  (5s default). A page that is already settled (static pages, or content already rendered) returns almost
+  immediately; nothing framework-specific is detected (no htmx/SPA special-casing).
+- New `--wait <ms>` flag on `read`, `content`, `actions`, `snapshot`, `blocks`, `click`, `click-selector`,
+  `click-text`, `type`, `select`, `check`, `uncheck`, `fill`, and `component` to override the default timeout (or
+  set `AUX4_BROWSER_SETTLE_WAIT`).
+
 ## 1.0.34
 
 Agent-ergonomics follow-up (BRW-009), from real agent transcripts driving the browser through `executeAux4`:

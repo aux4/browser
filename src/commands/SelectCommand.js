@@ -9,7 +9,8 @@ export async function SelectCommand(params) {
     role: params.role,
     ref: params.ref,
     selector: params.selector,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }

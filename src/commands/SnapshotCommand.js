@@ -6,7 +6,8 @@ export async function SnapshotCommand(params) {
     session: params.session,
     mode: params.mode,
     format: params.format,
-    output: params.output
+    output: params.output,
+    wait: params.wait
   });
   if (params.output) {
     console.log(JSON.stringify(result));

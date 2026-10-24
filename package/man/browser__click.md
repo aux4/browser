@@ -10,11 +10,16 @@ On timeout, returns `{clicked: false, reason: "timeout", description, currentUrl
 
 Use `--within <iframe-css>` to click inside an iframe. The default main-frame search cannot reach iframe content; `--within` resolves the element inside the frame via Playwright's frameLocator. Nest frames by joining selectors with `>>>`.
 
+Before reporting the result, waits for the page to settle — no in-flight network requests AND no DOM mutations
+for 500ms, bounded by `--wait` (default 5000ms, or `AUX4_BROWSER_SETTLE_WAIT` on the daemon) — so a click that
+triggers an async update (a delayed `fetch`, an htmx `hx-get`/`hx-trigger`) is reflected in the returned
+`url`/`title`/`errors` instead of the pre-update state.
+
 #### Usage
 
 ```bash
 aux4 browser click --session <id> --ref <n>
-aux4 browser click --session <id> --name <name> [--role button] [--index <n>] [--within <iframe-css>]
+aux4 browser click --session <id> --name <name> [--role button] [--index <n>] [--within <iframe-css>] [--wait <ms>]
 ```
 
     --session   Session ID (required)
@@ -23,6 +28,7 @@ aux4 browser click --session <id> --name <name> [--role button] [--index <n>] [-
     --index     1-based index when multiple elements match
     --ref       Snapshot ref index (from snapshot command), overrides name/role
     --within    Optional iframe CSS selector to click inside (frameLocator); nest with >>>
+    --wait      Max time to wait for the page to settle before returning, in ms (default: 5000, or AUX4_BROWSER_SETTLE_WAIT)
 
 #### Example
 

@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.34",
+  "version": "1.0.35",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -170,7 +170,7 @@
         {
           "name": "actions",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs actions values(session,within,includeNav,page)"
+            "node ${packageDir}/lib/aux4-browser.mjs actions values(session,within,includeNav,page,wait)"
           ],
           "help": {
             "text": "List every control a person could use on the current page (fields, buttons, links, options, clickable elements with no role) with label, value, context and how to act on it",
@@ -194,6 +194,11 @@
                 "name": "page",
                 "text": "Also return the page's headings, visible error messages, the start of its main text and its text blocks",
                 "default": "false"
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -201,7 +206,7 @@
         {
           "name": "fill",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs fill values(session,field,value,fields,within,timeout)"
+            "node ${packageDir}/lib/aux4-browser.mjs fill values(session,field,value,fields,within,timeout,wait)"
           ],
           "help": {
             "text": "Fill a form field (or a JSON map of fields) by its visible label",
@@ -235,6 +240,11 @@
                 "name": "timeout",
                 "text": "Timeout in milliseconds",
                 "default": "5000"
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -242,7 +252,7 @@
         {
           "name": "type",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,ref,within,selector)"
+            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,ref,within,selector,wait)"
           ],
           "help": {
             "text": "Type text into an input field",
@@ -283,6 +293,11 @@
                 "name": "selector",
                 "text": "CSS selector of the element (pierces open shadow roots; combine with --within for iframes), overrides name/role/ref",
                 "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -290,7 +305,7 @@
         {
           "name": "select",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs select values(session,name,value,role,ref,selector,within)"
+            "node ${packageDir}/lib/aux4-browser.mjs select values(session,name,value,role,ref,selector,within,wait)"
           ],
           "help": {
             "text": "Select an option from a dropdown",
@@ -329,6 +344,11 @@
                 "name": "within",
                 "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
                 "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -336,7 +356,7 @@
         {
           "name": "check",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs check values(session,name,role,ref,selector,within)"
+            "node ${packageDir}/lib/aux4-browser.mjs check values(session,name,role,ref,selector,within,wait)"
           ],
           "help": {
             "text": "Check a checkbox",
@@ -370,6 +390,11 @@
                 "name": "within",
                 "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
                 "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -377,7 +402,7 @@
         {
           "name": "uncheck",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs uncheck values(session,name,role,ref,selector,within)"
+            "node ${packageDir}/lib/aux4-browser.mjs uncheck values(session,name,role,ref,selector,within,wait)"
           ],
           "help": {
             "text": "Uncheck a checkbox",
@@ -411,6 +436,11 @@
                 "name": "within",
                 "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
                 "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -418,7 +448,7 @@
         {
           "name": "click",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs click values(session,name,role,index,ref,within)"
+            "node ${packageDir}/lib/aux4-browser.mjs click values(session,name,role,index,ref,within,wait)"
           ],
           "help": {
             "text": "Click an element by role+name or snapshot ref index",
@@ -452,6 +482,11 @@
                 "name": "within",
                 "text": "Optional iframe CSS selector to click inside (frameLocator); nest with >>>",
                 "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -459,7 +494,7 @@
         {
           "name": "read",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs read values(url,session,format,waitUntil,output)"
+            "node ${packageDir}/lib/aux4-browser.mjs read values(url,session,format,waitUntil,output,wait)"
           ],
           "help": {
             "text": "One-shot page read: navigate, settle, and return content + status",
@@ -488,6 +523,11 @@
                 "name": "output",
                 "text": "Write content to file instead of inline, returns path + summary",
                 "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -495,7 +535,7 @@
         {
           "name": "content",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs content values(session,selector,format,output)"
+            "node ${packageDir}/lib/aux4-browser.mjs content values(session,selector,format,output,wait)"
           ],
           "help": {
             "text": "Get page content",
@@ -519,6 +559,11 @@
                 "name": "output",
                 "text": "Write content to file instead of stdout, returns path + summary",
                 "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -526,7 +571,7 @@
         {
           "name": "snapshot",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs snapshot values(session,mode,format,output)"
+            "node ${packageDir}/lib/aux4-browser.mjs snapshot values(session,mode,format,output,wait)"
           ],
           "help": {
             "text": "Return an accessibility snapshot of the current page",
@@ -549,6 +594,11 @@
               {
                 "name": "output",
                 "text": "Write snapshot to file instead of stdout, returns path + summary",
+                "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
                 "default": ""
               }
             ]
@@ -700,7 +750,7 @@
         {
           "name": "click-selector",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs click-selector values(session,selector,within)"
+            "node ${packageDir}/lib/aux4-browser.mjs click-selector values(session,selector,within,wait)"
           ],
           "help": {
             "text": "Click an element by CSS selector",
@@ -718,6 +768,11 @@
               {
                 "name": "within",
                 "text": "Optional iframe CSS selector to click inside (frameLocator); nest with >>>",
+                "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
                 "default": ""
               }
             ]
@@ -772,7 +827,7 @@
         {
           "name": "click-text",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs click-text values(session,text,index,within)"
+            "node ${packageDir}/lib/aux4-browser.mjs click-text values(session,text,index,within,wait)"
           ],
           "help": {
             "text": "Click an element by its text content",
@@ -795,6 +850,11 @@
               {
                 "name": "within",
                 "text": "Optional iframe CSS selector to click inside (frameLocator); nest with >>>",
+                "default": ""
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
                 "default": ""
               }
             ]
@@ -1436,7 +1496,7 @@
         {
           "name": "component",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs component values(session,type,action,name,row,col,where,item,field,fields,value,tab,path,title,timeout)"
+            "node ${packageDir}/lib/aux4-browser.mjs component values(session,type,action,name,row,col,where,item,field,fields,value,tab,path,title,timeout,wait)"
           ],
           "help": {
             "text": "Interact with a UI component structurally (table, form, list, nav, menu, dialog, tab, tree, card)",
@@ -1516,6 +1576,11 @@
                 "name": "timeout",
                 "text": "Timeout in milliseconds",
                 "default": "5000"
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }
@@ -1523,7 +1588,7 @@
         {
           "name": "blocks",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs blocks values(session,url,waitUntil,maxBlockChars,includeNav)"
+            "node ${packageDir}/lib/aux4-browser.mjs blocks values(session,url,waitUntil,maxBlockChars,includeNav,wait)"
           ],
           "help": {
             "text": "Split the current page into content blocks (headings, paragraphs, list items, article/figure cards, table rows) via a deterministic DOM walk — no AI involved",
@@ -1552,6 +1617,11 @@
                 "name": "includeNav",
                 "text": "Include nav/footer/aside/header landmarks (skipped by default)",
                 "default": "false"
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
               }
             ]
           }

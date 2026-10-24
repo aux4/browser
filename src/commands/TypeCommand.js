@@ -19,7 +19,8 @@ export async function TypeCommand(params) {
       role: params.role,
       ref: params.ref,
       within: params.within,
-      selector: params.selector
+      selector: params.selector,
+      wait: params.wait
     });
   }
   console.log(JSON.stringify(result));

@@ -6,7 +6,8 @@ export async function ActionsCommand(params) {
     session: params.session,
     within: params.within,
     includeNav: params.includeNav,
-    page: params.page
+    page: params.page,
+    wait: params.wait
   });
   delete result.status;
   console.log(JSON.stringify(result));

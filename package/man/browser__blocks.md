@@ -29,6 +29,11 @@ Web components and frames:
 - **Open shadow roots** are walked right after their host element, so web-component content becomes blocks in page order.
 - **Visible child frames** (at least 100x50 px) contribute their blocks after the page's own, each with an extra `frame` field (the frame URL) and `ref: null` — use `--within` to act inside a frame.
 - With `--url`, the command waits up to 8 seconds for a single-page app to render text before walking the page.
+- Before walking the page, waits for it to settle — no in-flight network requests AND no DOM mutations for 500ms,
+  bounded by `--wait` (default 5000ms, or `AUX4_BROWSER_SETTLE_WAIT` on the daemon) — so blocks added by content
+  that finishes loading after the page already shows some placeholder text (a delayed `fetch`, an htmx
+  `hx-get`/`hx-trigger="load"`, any async render) are included instead of being missed. A page that is already
+  settled returns almost immediately.
 
 Block selection:
 
@@ -42,7 +47,7 @@ Works against any active session, local or remote (`--provider cdp`/`agentcore`)
 #### Usage
 
 ```bash
-aux4 browser blocks --session <id> [--url <url>] [--waitUntil load] [--maxBlockChars 1500] [--includeNav false]
+aux4 browser blocks --session <id> [--url <url>] [--waitUntil load] [--maxBlockChars 1500] [--includeNav false] [--wait <ms>]
 ```
 
     --session        Session ID (required)
@@ -50,6 +55,7 @@ aux4 browser blocks --session <id> [--url <url>] [--waitUntil load] [--maxBlockC
     --waitUntil      Navigation wait strategy when --url is given: domcontentloaded, load, networkidle, settle. Default: load
     --maxBlockChars  Cap each block's text at this many characters. Default: 1500
     --includeNav     Include nav/footer/aside/header landmarks (skipped by default). Default: false
+    --wait           Max time to wait for the page to settle before returning, in ms. Default: 5000 (or AUX4_BROWSER_SETTLE_WAIT)
 
 #### Example
 

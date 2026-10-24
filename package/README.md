@@ -274,6 +274,28 @@ Web components and frames are read too: text inside open shadow roots is include
 
 Single-page apps often finish loading with an empty page and render a few seconds later. Every navigation (`open --url`, `visit`, `read`, `blocks --url`) waits until the page shows rendered text — in the document, an open shadow root or a child frame — for up to 8 seconds. A static page with no scripts returns immediately. Set `AUX4_BROWSER_CONTENT_WAIT` (milliseconds) on the daemon to change the cap, or `0` to turn it off.
 
+#### Waiting for the page to settle
+
+A page can show *some* text (a "Loading…" placeholder, a skeleton screen) and still be mid-render: content arriving
+via a delayed `fetch`, an htmx `hx-get`/`hx-trigger="load"`, or any other async call fired after the page loads.
+`read`, `content`, `actions`, `snapshot`, `blocks`, and the after-action report of `click`, `click-selector`,
+`click-text`, `fill`, `type`, `select`, `check`, `uncheck` and `component` all wait for the page to go quiet on two
+independent signals before returning — no in-flight network request, and no DOM mutation — for a short quiet
+window (500ms), bounded by an overall timeout (5s by default). A page that is already settled (a static page, or
+one whose async content already finished) returns almost immediately; nothing framework-specific is detected, so
+this applies the same way to htmx, any SPA framework, or a hand-rolled `fetch`.
+
+Override the timeout per call with `--wait <ms>`, or set `AUX4_BROWSER_SETTLE_WAIT` (milliseconds) to change the
+default for every call:
+
+```bash
+# wait up to 10s for the page to settle before reading it
+aux4 browser read --url https://example.com/orders --wait 10000
+
+# change the default for every settle-aware command
+AUX4_BROWSER_SETTLE_WAIT=10000 aux4 browser start
+```
+
 #### User agent
 
 Sessions present a regular Chrome user agent. Browsers that announce automation in their user agent — local headless Chromium (`HeadlessChrome/...`) and remote providers such as Amazon Bedrock AgentCore (`Amazon-Bedrock-AgentCore-Browser/1.0 ...`) — have that token removed; everything else (platform, Chrome version) is kept. Some bot-management services block a page's own API calls for those tokens, which leaves a single-page app rendering an empty page. The user-agent client hints (`Sec-CH-UA` headers, `navigator.userAgentData`) are kept consistent with it.

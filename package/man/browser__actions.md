@@ -29,16 +29,23 @@ Controls in page chrome (header, nav, footer, aside) are skipped unless `--inclu
 result also carries `page`: the visible `headings`, visible error messages (`errors`), the start of the main text
 (`text`), the page's text `blocks` and its `textLength`.
 
+Before listing controls, waits for the page to settle — no in-flight network requests AND no DOM mutations for
+500ms, bounded by `--wait` (default 5000ms, or `AUX4_BROWSER_SETTLE_WAIT` on the daemon) — so controls added by
+content that finishes loading after the page already shows some placeholder text (a delayed `fetch`, an htmx
+`hx-get`/`hx-trigger="load"`, any async render) are listed instead of being missed. A page that is already settled
+returns almost immediately.
+
 #### Usage
 
 ```bash
-aux4 browser actions --session <id> [--within <iframe-css>] [--includeNav true] [--page true]
+aux4 browser actions --session <id> [--within <iframe-css>] [--includeNav true] [--page true] [--wait <ms>]
 ```
 
 --session     Session ID (required)
 --within      Only list the controls inside this iframe (CSS selector; nest with `>>>`)
 --includeNav  Include controls in header/nav/footer/aside landmarks (default: `false`)
 --page        Also return headings, errors, main text and text blocks (default: `false`)
+--wait        Max time to wait for the page to settle before returning, in ms (default: 5000, or `AUX4_BROWSER_SETTLE_WAIT`)
 
 #### Example
 

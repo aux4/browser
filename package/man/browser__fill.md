@@ -12,6 +12,9 @@ first command to reach for when acting on a single labelled input, text area, `<
   with no effect.
 - Reports `{status, url, title, errors}` after writing the value, same as `click`/`type`/`select`/`check` — so
   you know immediately whether the page changed or a validation message appeared, never a bare `{"status":"ok"}`.
+  Before reporting, waits for the page to settle — no in-flight network requests AND no DOM mutations for 500ms,
+  bounded by `--wait` (default 5000ms, or `AUX4_BROWSER_SETTLE_WAIT` on the daemon) — so an async validation
+  message is captured instead of missed.
 - **`--within`** scopes the lookup inside an iframe (CSS selector; nest with `>>>`).
 
 For a structural component that itself contains labelled fields (e.g. a named `<form>`), use
@@ -21,7 +24,7 @@ For a structural component that itself contains labelled fields (e.g. a named `<
 #### Usage
 
 ```bash
-aux4 browser fill --session <id> [--field <label> --value <value>] [--fields <json>] [--within <iframe-css>] [--timeout 5000]
+aux4 browser fill --session <id> [--field <label> --value <value>] [--fields <json>] [--within <iframe-css>] [--timeout 5000] [--wait <ms>]
 ```
 
     --session  Session ID (required)
@@ -30,6 +33,7 @@ aux4 browser fill --session <id> [--field <label> --value <value>] [--fields <js
     --fields   JSON map of label to value, to fill multiple fields in one call
     --within   Optional iframe CSS selector to scope into (frameLocator); nest with >>>
     --timeout  Timeout in milliseconds. Default: 5000
+    --wait     Max time to wait for the page to settle before returning, in ms. Default: 5000 (or AUX4_BROWSER_SETTLE_WAIT)
 
 #### Example
 

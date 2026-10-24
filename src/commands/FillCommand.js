@@ -8,7 +8,8 @@ export async function FillCommand(params) {
     value: params.value,
     fields: params.fields,
     within: params.within,
-    timeout: params.timeout
+    timeout: params.timeout,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }

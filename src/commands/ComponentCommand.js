@@ -17,7 +17,8 @@ export async function ComponentCommand(params) {
     tab: params.tab,
     path: params.path,
     title: params.title,
-    timeout: params.timeout
+    timeout: params.timeout,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }

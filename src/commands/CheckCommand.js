@@ -8,7 +8,8 @@ export async function CheckCommand(params) {
     role: params.role,
     ref: params.ref,
     selector: params.selector,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }
@@ -21,7 +22,8 @@ export async function UncheckCommand(params) {
     role: params.role,
     ref: params.ref,
     selector: params.selector,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }

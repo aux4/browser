@@ -6,7 +6,8 @@ export async function ContentCommand(params) {
     session: params.session,
     selector: params.selector,
     format: params.format,
-    output: params.output
+    output: params.output,
+    wait: params.wait
   });
   if (params.output) {
     console.log(JSON.stringify(result));

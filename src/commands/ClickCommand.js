@@ -8,7 +8,8 @@ export async function ClickCommand(params) {
     role: params.role,
     index: params.index,
     ref: params.ref,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }

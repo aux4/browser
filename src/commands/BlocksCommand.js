@@ -7,7 +7,8 @@ export async function BlocksCommand(params) {
     url: params.url,
     waitUntil: params.waitUntil,
     maxBlockChars: params.maxBlockChars,
-    includeNav: params.includeNav
+    includeNav: params.includeNav,
+    wait: params.wait
   });
   console.log(JSON.stringify(result.blocks || []));
 }

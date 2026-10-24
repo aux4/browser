@@ -5,7 +5,8 @@ export async function ClickSelectorCommand(params) {
   const result = await client.send("click-selector", {
     session: params.session,
     selector: params.selector,
-    within: params.within
+    within: params.within,
+    wait: params.wait
   });
   console.log(JSON.stringify(result));
 }

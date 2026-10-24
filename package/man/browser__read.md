@@ -13,13 +13,14 @@ The `markdown` and `text` formats return only readable page text:
 - **Frames** — the readable text of every visible child frame (at least 100x50 px; tracking pixels and hidden frames are skipped) follows the page's own content after a `---` line
 - **Blocked pages** — when the site's own requests are refused (HTTP 403/429) and the page shows no text, the result carries a `blocked` object (`status`, `requests`, `vendor` such as `Imperva`/`Cloudflare`/`Akamai`/`DataDome`) and `warning` explains that the site's bot protection kept the page from rendering
 - **Rendered content** — after navigating, the read waits up to 8 seconds (`AUX4_BROWSER_CONTENT_WAIT` ms on the daemon, `0` disables) for a single-page app to show rendered text; a static page with no scripts returns immediately
+- **Page settle** — before extracting content, waits for no in-flight network requests AND no DOM mutations for 500ms, bounded by `--wait` (default 5000ms, or `AUX4_BROWSER_SETTLE_WAIT` on the daemon). This catches content that finishes loading after the "Loading…" placeholder is already showing some text (a delayed `fetch`, an htmx `hx-get`/`hx-trigger="load"`, any async render); a page that is already settled returns almost immediately
 
 The `html` format returns the raw HTML unchanged.
 
 #### Usage
 
 ```bash
-aux4 browser read --url <url> [--format markdown] [--waitUntil load] [--session <id>] [--output <path>]
+aux4 browser read --url <url> [--format markdown] [--waitUntil load] [--session <id>] [--output <path>] [--wait <ms>]
 ```
 
     --url        URL to read (required)
@@ -27,6 +28,7 @@ aux4 browser read --url <url> [--format markdown] [--waitUntil load] [--session 
     --waitUntil  Navigation wait strategy: domcontentloaded, load, networkidle, settle. Default: load
     --session    Existing session ID to reuse (optional)
     --output     Write content to file instead of inline. Returns {path, contentLength, headingCount, firstHeading, preview}
+    --wait       Max time to wait for the page to settle before returning, in ms. Default: 5000 (or AUX4_BROWSER_SETTLE_WAIT)
 
 #### Example
 

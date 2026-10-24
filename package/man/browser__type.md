@@ -6,11 +6,15 @@ Use `--selector <css>` to address the field by CSS selector instead (it reaches 
 
 Use `--within <iframe-css>` to type into a field inside an iframe (frameLocator); the default main-frame search cannot reach iframe content. Nest frames by joining selectors with `>>>`.
 
+Before reporting the result, waits for the page to settle — no in-flight network requests AND no DOM mutations
+for 500ms, bounded by `--wait` (default 5000ms, or `AUX4_BROWSER_SETTLE_WAIT` on the daemon) — so an async
+validation message triggered by typing is reflected in the returned `url`/`title`/`errors`.
+
 ## Usage
 
 ```
-aux4 browser type --session <id> --name <name> --value <text> [--role textbox] [--within <iframe-css>]
-aux4 browser type --session <id> --selector <css> --value <text> [--within <iframe-css>]
+aux4 browser type --session <id> --name <name> --value <text> [--role textbox] [--within <iframe-css>] [--wait <ms>]
+aux4 browser type --session <id> --selector <css> --value <text> [--within <iframe-css>] [--wait <ms>]
 ```
 
 ## Options
@@ -21,3 +25,4 @@ aux4 browser type --session <id> --selector <css> --value <text> [--within <ifra
 - `--role` — ARIA role (default: textbox)
 - `--within` — Optional iframe CSS selector to scope into (frameLocator); nest with `>>>`
 - `--selector` — CSS selector of the field (pierces open shadow roots); overrides `--name`/`--role`/`--ref`
+- `--wait` — Max time to wait for the page to settle before returning, in ms (default: 5000, or `AUX4_BROWSER_SETTLE_WAIT`)
