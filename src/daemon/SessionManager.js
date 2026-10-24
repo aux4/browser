@@ -195,6 +195,41 @@ export class SessionManager {
     return result;
   }
 
+  // BRW-008: dispatch a component-fill value to the right Playwright action
+  // based on the matched element's tag/type, firing the same events a real
+  // user interaction would (fill/selectOption/check/uncheck). Throws a clear,
+  // named error instead of silently resolving when the field has no match.
+  async _fillComponentField(fieldLocator, fieldName, value, timeout) {
+    const count = await fieldLocator.count();
+    if (count === 0) {
+      throw new Error(`component fill: field "${fieldName}" not found`);
+    }
+    const target = fieldLocator.first();
+    const tagName = await target.evaluate(el => el.tagName.toLowerCase()).catch(() => "");
+
+    if (tagName === "select") {
+      try {
+        await target.selectOption({ label: String(value) }, { timeout });
+      } catch {
+        await target.selectOption(String(value), { timeout });
+      }
+      return;
+    }
+
+    const inputType = await target.evaluate(el => (el.type || "").toLowerCase()).catch(() => "");
+    if (inputType === "checkbox" || inputType === "radio") {
+      const truthy = ["true", "1", "yes", "on", "checked"].includes(String(value).trim().toLowerCase());
+      if (inputType === "radio" || truthy) {
+        await target.check({ timeout });
+      } else {
+        await target.uncheck({ timeout });
+      }
+      return;
+    }
+
+    await target.fill(String(value), { timeout });
+  }
+
   async screenshotOnError(session) {
     if (!session.outputDir) return null;
     try {
@@ -922,15 +957,18 @@ export class SessionManager {
       }
       case "fill": {
         // For form components: fill a single field or a JSON map of fields.
+        // Dispatches per matched element (text/textarea -> fill, select ->
+        // selectOption, checkbox/radio -> check/uncheck); a field that
+        // cannot be matched always errors, never silently no-ops.
         if (params.fields) {
           const fields = typeof params.fields === "string" ? JSON.parse(params.fields) : params.fields;
           for (const [name, value] of Object.entries(fields)) {
-            await locator.getByLabel(name).fill(String(value), { timeout });
+            await this._fillComponentField(locator.getByLabel(name), name, value, timeout);
           }
           return this._attachSnapshot(session, { status: "ok", filled: Object.keys(fields).length });
         }
         if (params.value != null) {
-          await locator.fill(String(params.value), { timeout });
+          await this._fillComponentField(locator, params.field || params.name || type, params.value, timeout);
           return this._attachSnapshot(session, { status: "ok" });
         }
         throw new Error("component fill: provide --fields (json) or --value");

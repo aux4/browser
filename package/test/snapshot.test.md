@@ -15,6 +15,12 @@
     <thead><tr><th>Name</th></tr></thead>
     <tbody><tr><td>Row 1</td></tr></tbody>
   </table>
+  <label for="plan">Plan</label>
+  <select id="plan">
+    <option value="">Choose</option>
+    <option value="pro">Pro</option>
+    <option value="basic">Basic</option>
+  </select>
 </body>
 </html>
 ```
@@ -90,4 +96,20 @@ aux4 browser close --session $SESSION >/dev/null
 
 ```expect:partial
 Snapshot Fixture
+```
+
+### should label a select by its <label for> text, not its option text
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/snapshot-fixture.html")
+aux4 browser snapshot --session $SESSION --mode auto --format text | grep -m1 "combobox"
+aux4 browser close --session $SESSION >/dev/null
+```
+
+```expect:partial
+combobox "Plan"
 ```

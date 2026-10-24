@@ -231,8 +231,11 @@ aux4 browser component --session <id> --type table --action read
 # Click a specific table cell
 aux4 browser component --session <id> --type table --action click --row 2 --col "Name"
 
-# Fill a form
-aux4 browser component --session <id> --type form --action fill --fields '{"Email":"user@test.com","Password":"secret"}'
+# Fill a form (positional action word works too, e.g. "component fill")
+aux4 browser component fill --session <id> --type form --fields '{"Email":"user@test.com","Password":"secret"}'
+
+# Fill a single labelled field
+aux4 browser component fill --session <id> --type form --field "Email" --value "user@test.com"
 
 # Count list items
 aux4 browser component --session <id> --type list --action count
@@ -243,7 +246,9 @@ aux4 browser component --session <id> --type nav --action scroll --name "Footer"
 
 Supported types: `table`, `form`, `list`, `nav`, `menu`, `dialog`, `tab`, `tree`, `card`.
 
-Actions: `locate`, `click`, `hover`, `read`, `count`, `bounds`, `fill`, `scroll`.
+Actions: `locate`, `click`, `hover`, `read`, `count`, `bounds`, `fill`, `scroll`. `--action` can be passed either as a flag (`--action fill`) or as the bare word right after `component` (`component fill ...`).
+
+`fill` dispatches per matched element — `fill()` for text/email/date/textarea inputs, `selectOption()` (by option label, falling back to value) for `<select>`, and `check()`/`uncheck()` for checkboxes and radios based on a truthy `--value` (`true`, `1`, `yes`, `on`, `checked`). A field (via `--field` or a key in `--fields`) that cannot be matched always fails with a named error — it never reports `ok` with no effect.
 
 ### Assertions
 

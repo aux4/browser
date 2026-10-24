@@ -31,6 +31,21 @@
     <label>Password <input type="password" name="password"></label>
     <button type="submit">Sign In</button>
   </form>
+
+  <form aria-label="Contact">
+    <label for="contact-name">Name</label>
+    <input id="contact-name" name="name" type="text">
+    <label for="contact-bio">Bio</label>
+    <textarea id="contact-bio" name="bio"></textarea>
+    <label for="contact-plan">Plan</label>
+    <select id="contact-plan" name="plan">
+      <option value="">Choose</option>
+      <option value="pro">Pro</option>
+      <option value="basic">Basic</option>
+    </select>
+    <label><input type="checkbox" id="contact-subscribe" name="subscribe"> Subscribe</label>
+    <button type="submit">Save</button>
+  </form>
 </body>
 </html>
 ```
@@ -144,4 +159,112 @@ exit:1
 
 ```error:partial
 Unknown component type
+```
+
+### should fill a text field using the bare "fill" action word
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/component-fixture.html")
+aux4 browser component fill --session $SESSION --type form --name Contact --field Name --value "Ada Lovelace"
+aux4 browser eval --session $SESSION --script "document.getElementById('contact-name').value"
+aux4 browser close --session $SESSION >/dev/null
+```
+
+```expect:partial
+Ada Lovelace
+```
+
+### should fill a textarea
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/component-fixture.html")
+aux4 browser component --session $SESSION --type form --name Contact --field Bio --value "hello world" --action fill
+aux4 browser eval --session $SESSION --script "document.getElementById('contact-bio').value"
+aux4 browser close --session $SESSION >/dev/null
+```
+
+```expect:partial
+hello world
+```
+
+### should fill a select by option label
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/component-fixture.html")
+aux4 browser component --session $SESSION --type form --name Contact --field Plan --value Pro --action fill
+aux4 browser eval --session $SESSION --script "document.getElementById('contact-plan').value"
+aux4 browser close --session $SESSION >/dev/null
+```
+
+```expect:partial
+pro
+```
+
+### should check a checkbox
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/component-fixture.html")
+aux4 browser component --session $SESSION --type form --name Contact --field Subscribe --value true --action fill
+aux4 browser eval --session $SESSION --script "document.getElementById('contact-subscribe').checked"
+aux4 browser close --session $SESSION >/dev/null
+```
+
+```expect:partial
+true
+```
+
+### should fill multiple fields with a fields JSON map
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/component-fixture.html")
+aux4 browser component --session $SESSION --type form --name Contact --fields '{"Name":"Grace Hopper","Bio":"Admiral"}' --action fill | grep -o '"filled":[0-9]*'
+aux4 browser eval --session $SESSION --script "document.getElementById('contact-name').value + '|' + document.getElementById('contact-bio').value"
+aux4 browser close --session $SESSION >/dev/null
+```
+
+```expect
+"filled":2
+Grace Hopper|Admiral
+```
+
+### should fail with a clear error when the field cannot be matched
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/component-fixture.html")
+aux4 browser component --session $SESSION --type form --name Contact --field "No Such Field" --value x --action fill
+EXIT=$?
+aux4 browser close --session $SESSION >/dev/null
+echo "exit:$EXIT"
+```
+
+```expect:partial
+exit:1
+```
+
+```error:partial
+component fill: field \"No Such Field\" not found
 ```
