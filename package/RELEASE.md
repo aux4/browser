@@ -1,6 +1,6 @@
 # Release notes
 
-## Unreleased
+## 1.0.36
 
 Agent-ergonomics follow-up (BRW-010), from a dojo booking-wizard trace (78 calls / 49 failed) and a contact-form
 trace hit in the dojo container:
