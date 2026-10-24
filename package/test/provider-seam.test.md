@@ -1,13 +1,81 @@
 # Provider seam (--provider on open/close)
 
 These tests exercise aux4/browser core's provider seam (CBR-008) without any real cloud provider: `mock-open`
-/ `mock-attach` / `mock-close` / `broken-open` are TEST-FIXTURE-ONLY private commands (see `package/test/.aux4`
-— kept out of the published package manifest so the installed command surface never lists them) that
-stand in for a plugin like aux4/browser-agentcore. They return a `wsUrl` core cannot actually connect to
+/ `mock-attach` / `mock-close` / `broken-open` are TEST-FIXTURE-ONLY private commands that stand in for a plugin
+like aux4/browser-agentcore. They are declared below as a `file:.aux4` fixture (merged into the `browser`
+profile only while this test file runs, then removed) rather than shipped in `package/.aux4`, so the published/
+installed `aux4/browser` command surface never lists them and `pkger build`/`releaser install` never trips on a
+second `.aux4` sitting in the package tree. They return a `wsUrl` core cannot actually connect to
 (`ws://127.0.0.1:1/mock`, a refused connection), so what's being verified is the DISPATCH and ERROR HANDLING of
 the seam — that core calls out to `<provider>-open`/`-attach`/`-close`, hands the response straight to
 `connectOverCDP`, and never silently falls back to a local browser when a provider is requested and fails. The
 real happy-path (a provider that actually connects) is covered live against Amazon Bedrock AgentCore, not here.
+
+```file:.aux4
+{
+  "profiles": [
+    {
+      "name": "browser",
+      "commands": [
+        {
+          "name": "mock-open",
+          "private": true,
+          "execute": [
+            "echo '{\"token\":\"tok-abc\",\"wsUrl\":\"ws://127.0.0.1:1/mock\",\"headers\":{}}'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: fake provider-open used by browser package tests to exercise the provider seam without AWS. Never a real provider."
+          }
+        },
+        {
+          "name": "mock-attach",
+          "private": true,
+          "execute": [
+            "echo '{\"wsUrl\":\"ws://127.0.0.1:1/mock\",\"headers\":{}}'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: fake provider-attach used by browser package tests to exercise the provider seam without AWS. Never a real provider.",
+            "variables": [
+              {
+                "name": "token",
+                "text": "opaque token (ignored by the fixture)",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "mock-close",
+          "private": true,
+          "execute": [
+            "echo '{\"status\":\"closed\"}'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: fake provider-close used by browser package tests to exercise the provider seam without AWS. Never a real provider.",
+            "variables": [
+              {
+                "name": "token",
+                "text": "opaque token (ignored by the fixture)",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "broken-open",
+          "private": true,
+          "execute": [
+            "echo 'not-json'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: a provider-open that returns invalid JSON, used to test that the provider seam fails loudly instead of falling back to a local browser."
+          }
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## open --provider dispatches to <provider>-open
 
