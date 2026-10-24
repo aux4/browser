@@ -292,6 +292,28 @@ exit:1
 component fill: field \"No Such Field\" not found
 ```
 
+### should point to the simpler `fill` --field form when no --value and no --fields is given
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/component-fixture.html")
+aux4 browser component --session $SESSION --type form --name Contact --field Name --action fill
+EXIT=$?
+aux4 browser close --session $SESSION >/dev/null
+echo "exit:$EXIT"
+```
+
+```expect:partial
+exit:1
+```
+
+```error:partial
+component fill: provide --fields (json) or --value*--field \"Name=value\"
+```
+
 ### should point to `fill` when given a field-level type instead of a structural one
 
 ```timeout

@@ -161,6 +161,46 @@ aux4 browser close --session $SESSION >/dev/null
 "text":"Welcome to*"truncated":true
 ```
 
+## on a page with a table
+
+```file:blocks-table-fixture.html
+<!DOCTYPE html>
+<html>
+<head><title>Table Fixture</title></head>
+<body>
+  <table>
+    <tr><th>Name</th><th>Category</th><th>In Stock</th><th>Price</th></tr>
+    <tr><td>BassWave X</td><td>headphones</td><td>yes</td><td>27.75</td></tr>
+  </table>
+</body>
+</html>
+```
+
+```beforeAll
+nohup aux4 browser start --persistent true >/dev/null 2>&1 &
+sleep 4
+```
+
+```afterAll
+aux4 browser stop
+```
+
+### should keep table cells apart with a separator instead of gluing them together
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/blocks-table-fixture.html")
+aux4 browser blocks --session $SESSION | grep -o '"text":"BassWave X | headphones | yes | 27.75"'
+aux4 browser close --session $SESSION >/dev/null
+```
+
+```expect
+"text":"BassWave X | headphones | yes | 27.75"
+```
+
 ## on a page with no body content
 
 ```file:blocks-empty-fixture.html

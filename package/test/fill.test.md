@@ -182,7 +182,7 @@ field \"Nonexistent\" not found
 exit:1
 ```
 
-### should fail with a clear error when neither field nor fields is given
+### should fail with a clear error (the canonical --field form) when neither field nor fields is given
 
 ```timeout
 30000
@@ -197,7 +197,29 @@ echo "exit:$EXIT"
 ```
 
 ```error:partial
-provide --field *?
+use --field \"Destination=Tokyo\" (repeat --field for more fields, e.g. --field \"Class=Business\")
+```
+
+```expect:partial
+exit:1
+```
+
+### builds the error's example from --value when a small model drops --label/other unknown flags (--value survives, --label does not)
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/fill-fixture.html" 2>/dev/null)
+aux4 browser fill --session $SESSION --label Name --value Tokyo
+EXIT=$?
+aux4 browser close --session $SESSION >/dev/null 2>&1
+echo "exit:$EXIT"
+```
+
+```error:partial
+use --field \"Label=Tokyo\" (repeat --field for more fields, e.g. --field \"Class=Business\")
 ```
 
 ```expect:partial

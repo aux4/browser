@@ -1,5 +1,18 @@
 # Release notes
 
+## 1.0.39
+
+From the same dojo trace as BRW-011 (BRW-012):
+
+- **`blocks` keeps a `<tr>`'s cells apart.** A table row's text used to be `node.textContent` with no separator
+  between cells (e.g. `"BassWave Xheadphonesyes27.75"`); it's now the cells joined with `" | "`
+  (`"BassWave X | headphones | yes | 27.75"`), so a ranker (or an agent) can tell the columns apart.
+- **Clearer `fill` / `component fill` error when the arguments don't fit.** A small model guessing flags that
+  don't exist (`--label "Destination" --value "Tokyo"`, `--plan "Pro"`) used to get a generic
+  "provide --field..." message with no example. The error now shows the canonical `--field "Label=value"` form,
+  with an example built from whatever was actually passed (e.g. `--value "Tokyo"` survives even though `--label`
+  is silently dropped by aux4 core, so the example becomes `--field "Label=Tokyo"`).
+
 ## 1.0.38
 
 Agent-ergonomics follow-up (BRW-011), from a dojo contact-form trace: after a successful `fill` (`filled:4`)

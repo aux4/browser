@@ -282,7 +282,17 @@ function collectBlocks({ interactiveRoles, componentRoles, navTags, navRoles, sk
           if (!isVisible(node)) continue;
           if (!isLeafCandidate(node)) continue;
 
-          let text = norm(node.shadowRoot ? node.shadowRoot.textContent + " " + node.textContent : node.textContent);
+          // A <tr>'s cells have no whitespace between them in textContent
+          // (e.g. "BassWave X" + "headphones" + "yes" + "27.75" glues into
+          // "BassWave Xheadphonesyes27.75") — join cells with " | " so the
+          // ranker/caller can tell them apart.
+          let text;
+          if (tag === "tr") {
+            const cells = Array.from(node.querySelectorAll(":scope > td, :scope > th"));
+            text = norm(cells.length ? cells.map((c) => norm(c.textContent)).join(" | ") : node.textContent);
+          } else {
+            text = norm(node.shadowRoot ? node.shadowRoot.textContent + " " + node.textContent : node.textContent);
+          }
           if (!text) continue;
 
           const truncated = text.length > maxBlockChars;

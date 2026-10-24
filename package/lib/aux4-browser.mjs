@@ -292,7 +292,17 @@ function collectBlocks({ interactiveRoles, componentRoles, navTags, navRoles, sk
           if (!isVisible(node)) continue;
           if (!isLeafCandidate(node)) continue;
 
-          let text = norm(node.shadowRoot ? node.shadowRoot.textContent + " " + node.textContent : node.textContent);
+          // A <tr>'s cells have no whitespace between them in textContent
+          // (e.g. "BassWave X" + "headphones" + "yes" + "27.75" glues into
+          // "BassWave Xheadphonesyes27.75") — join cells with " | " so the
+          // ranker/caller can tell them apart.
+          let text;
+          if (tag === "tr") {
+            const cells = Array.from(node.querySelectorAll(":scope > td, :scope > th"));
+            text = norm(cells.length ? cells.map((c) => norm(c.textContent)).join(" | ") : node.textContent);
+          } else {
+            text = norm(node.shadowRoot ? node.shadowRoot.textContent + " " + node.textContent : node.textContent);
+          }
           if (!text) continue;
 
           const truncated = text.length > maxBlockChars;
@@ -1607,6 +1617,18 @@ function encodeSessionId(provider, token) {
   return `${provider}:${token}`;
 }
 
+// BRW-012: the small models calling `fill` guess flags that don't exist
+// (`--label "Destination" --value "Tokyo"`, `--plan "Pro"`) instead of the
+// one real form, `--field "Label=value"`. aux4 core silently drops any flag
+// the command does not declare, so by the time this runs those guesses are
+// already gone — only a declared `--value` (if one was given) survives to
+// build the example from what the caller actually passed; the field name in
+// the example is always a placeholder.
+function fillUsage(value) {
+  const example = value != null && value !== "" ? `"Label=${value}"` : `"Destination=Tokyo"`;
+  return `use --field ${example} (repeat --field for more fields, e.g. --field "Class=Business"), or --fields '{"Label":"value",...}'`;
+}
+
 // Built-in provider "cdp": attach to ANY remote Chromium over a CDP WebSocket
 // URL the caller already holds (e.g. a short-lived presigned URL minted by a
 // control plane that owns the remote session). No plugin, no vendor code, no
@@ -2312,7 +2334,7 @@ class SessionManager {
     }
 
     if (!params.field) {
-      throw new Error(`fill: provide --field <label> --value <value>, or --fields '{"Label":"value",...}'`);
+      throw new Error(`fill: ${fillUsage(params.value)}`);
     }
     if (params.value == null || params.value === "") {
       throw new Error(`fill: --value is required for field "${params.field}"`);
@@ -3501,7 +3523,7 @@ class SessionManager {
           const extra = await this._submitHint(base, label);
           return this._afterAction(session, extra, params.wait);
         }
-        throw new Error("component fill: provide --fields (json) or --value");
+        throw new Error(`component fill: provide --fields (json) or --value. To fill one field by its label, the simpler "fill" command takes --field "Label=value" (e.g. --field "${params.field || "Label"}=value").`);
       }
       case "scroll": {
         await locator.first().scrollIntoViewIfNeeded({ timeout });
