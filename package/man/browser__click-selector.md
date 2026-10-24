@@ -16,7 +16,7 @@ triggers an async update is reflected in the returned `url`/`title`/`errors`.
 aux4 browser click-selector --session <id> --selector <css> [--within <iframe-css>] [--wait <ms>]
 ```
 
-    --session    Session ID (required)
+    --session    Session ID; defaults to the most recently used open session when omitted
     --selector   CSS selector to click (required)
     --within     Optional iframe CSS selector to click inside (frameLocator); nest frames with >>>
     --wait       Max time to wait for the page to settle before returning, in ms (default: 5000, or AUX4_BROWSER_SETTLE_WAIT)

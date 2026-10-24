@@ -25,7 +25,7 @@ settled returns almost immediately.
 aux4 browser snapshot --session <id> [--mode auto] [--format json] [--output <path>] [--wait <ms>]
 ```
 
-    --session   Session ID (required)
+    --session   Session ID; defaults to the most recently used open session when omitted
     --mode      Snapshot mode: auto, full (default: auto)
     --format    Output format: json, text (default: json)
     --output    Write snapshot to file. Returns {path, title, elementCount, componentCount} for cheap triage

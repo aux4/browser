@@ -12,7 +12,7 @@ Scroll the page by direction and amount, or scroll a specific element into view 
 aux4 browser scroll --session <id> [--direction down] [--amount 500] [--to <text>]
 ```
 
-    --session     Session ID (required)
+    --session     Session ID; defaults to the most recently used open session when omitted
     --direction   Scroll direction: up, down, top, bottom (default: down)
     --amount      Scroll amount in pixels (default: 500)
     --to          Scroll to element by text content

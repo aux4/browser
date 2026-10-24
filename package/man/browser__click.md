@@ -22,7 +22,7 @@ aux4 browser click --session <id> --ref <n>
 aux4 browser click --session <id> --name <name> [--role button] [--index <n>] [--within <iframe-css>] [--wait <ms>]
 ```
 
-    --session   Session ID (required)
+    --session   Session ID; defaults to the most recently used open session when omitted
     --name      Accessible name of the element
     --role      ARIA role (default: button)
     --index     1-based index when multiple elements match

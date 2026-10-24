@@ -12,7 +12,7 @@ Common keys: `Enter`, `Tab`, `Escape`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `Arr
 aux4 browser press --session <id> --key <key> [--selector <css>]
 ```
 
-    --session    Session ID (required)
+    --session    Session ID; defaults to the most recently used open session when omitted
     --key        Key to press (required)
     --selector   CSS selector to focus before pressing
 

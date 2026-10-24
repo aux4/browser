@@ -14,7 +14,7 @@ The snapshot mode can also be set at session open time via `aux4 browser open --
 aux4 browser set-snapshot --session <id> --mode <off|auto|full>
 ```
 
-    --session   Session ID (required)
+    --session   Session ID; defaults to the most recently used open session when omitted
     --mode      Snapshot mode: off, auto, full (required)
 
 #### Example

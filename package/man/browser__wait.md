@@ -18,7 +18,7 @@ On timeout, returns `{timedOut: true, waitedFor, timeout, currentUrl, title, vis
 aux4 browser wait --session <id> --selector <target> [--timeout 10000]
 ```
 
-    --session   Session ID (required)
+    --session   Session ID; defaults to the most recently used open session when omitted
     --selector  Wait target: CSS selector, text=..., url=..., networkidle, or settle (required)
     --timeout   Timeout in milliseconds. Default: 10000
 

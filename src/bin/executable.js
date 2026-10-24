@@ -60,7 +60,7 @@ const commands = {
   mouse:       { handler: MouseCommand,    args: ["session", "action", "x", "y", "steps", "selector", "within"] },
   "click-text": { handler: ClickTextCommand, args: ["session", "text", "index", "within", "wait"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
-  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "ref", "within", "selector", "wait"] },
+  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "ref", "within", "selector", "timeout", "wait"] },
   scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount", "to"] },
   content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output", "wait"] },
   screenshot:  { handler: ScreenshotCommand, args: ["session", "output", "fullPage"] },

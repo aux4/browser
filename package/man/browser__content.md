@@ -16,7 +16,7 @@ aux4 browser content --session <id> [--selector <css>] [--format markdown] [--ou
 
 ## Options
 
-- `--session` — Session ID (required)
+- `--session` — Session ID; defaults to the most recently used open session when omitted
 - `--selector` — CSS selector for specific element (default: full page)
 - `--format` — Output format: markdown, html, text (default: markdown)
 - `--output` — Write content to file instead of stdout. Returns `{path, contentLength, headingCount, firstHeading, preview}` for cheap triage

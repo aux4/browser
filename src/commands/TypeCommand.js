@@ -20,6 +20,7 @@ export async function TypeCommand(params) {
       ref: params.ref,
       within: params.within,
       selector: params.selector,
+      timeout: params.timeout,
       wait: params.wait
     });
   }

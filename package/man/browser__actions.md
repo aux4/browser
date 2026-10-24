@@ -41,7 +41,7 @@ returns almost immediately.
 aux4 browser actions --session <id> [--within <iframe-css>] [--includeNav true] [--page true] [--wait <ms>]
 ```
 
---session     Session ID (required)
+--session     Session ID; defaults to the most recently used open session when omitted
 --within      Only list the controls inside this iframe (CSS selector; nest with `>>>`)
 --includeNav  Include controls in header/nav/footer/aside landmarks (default: `false`)
 --page        Also return headings, errors, main text and text blocks (default: `false`)

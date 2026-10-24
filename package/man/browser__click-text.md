@@ -16,7 +16,7 @@ triggers an async update is reflected in the returned `url`/`title`/`errors`.
 aux4 browser click-text --session <id> --text <text> [--index <n>] [--within <iframe-css>] [--wait <ms>]
 ```
 
-    --session   Session ID (required)
+    --session   Session ID; defaults to the most recently used open session when omitted
     --text      Text content to find and click (required)
     --index     1-based index when multiple elements match
     --within    Optional iframe CSS selector to click inside (frameLocator); nest with >>>

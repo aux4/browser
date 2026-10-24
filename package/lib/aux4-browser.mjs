@@ -1702,7 +1702,15 @@ class SessionManager {
   // browser: a provider-prefixed id that fails to reattach throws loudly, and
   // a plain local id that isn't tracked here throws "Session not found" same
   // as before (see CBR-007/CBR-008).
+  //
+  // BRW-010: --session is optional on every session command, not just
+  // `visit`. A genuinely empty sessionId (omitted entirely) resolves to the
+  // only/most-recently-active open session via requireSessionId(); a
+  // wrong/stale id still fails loudly below. This is the single choke point
+  // every command's `resolveSession(sessionId)` call goes through, so the
+  // fallback applies everywhere without touching each command individually.
   async resolveSession(sessionId) {
+    sessionId = this.requireSessionId(sessionId);
     const existing = this.sessions.get(sessionId);
     if (existing) {
       this.resetTimer(existing);
@@ -2169,14 +2177,91 @@ class SessionManager {
     return this._attachSnapshot(session, result);
   }
 
+  // BRW-010: snapshot of what IS on the page — compact label/type lists for
+  // form fields and visible text for clickable controls — so a "not found"
+  // error can tell an agent what to try next instead of making it guess
+  // again. Capped at `limit` of each so the error stays short; best-effort
+  // (returns null rather than throwing if the page can't be read, e.g. mid-
+  // navigation).
+  async _pageAffordances(session, limit = 15) {
+    try {
+      const page = session.pages[session.activeTab];
+      return await page.evaluate((limit) => {
+        const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
+        const fields = [];
+        const seenFields = new Set();
+        document.querySelectorAll("input, textarea, select").forEach((el) => {
+          if (fields.length >= limit) return;
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 1 || rect.height < 1) return;
+          let label = "";
+          if (el.labels && el.labels.length) label = norm(el.labels[0].textContent);
+          if (!label) label = norm(el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.name || "");
+          if (!label) return;
+          const key = label.toLowerCase();
+          if (seenFields.has(key)) return;
+          seenFields.add(key);
+          const tag = el.tagName.toLowerCase();
+          const type = tag === "select" ? "select" : tag === "textarea" ? "textarea" : (el.type || "text");
+          fields.push({ label, type });
+        });
+        const buttons = [];
+        const seenButtons = new Set();
+        document.querySelectorAll("button, [role='button'], input[type='submit'], input[type='button'], a[href]").forEach((el) => {
+          if (buttons.length >= limit) return;
+          const rect = el.getBoundingClientRect();
+          if (rect.width < 1 || rect.height < 1) return;
+          const text = norm(el.textContent || el.value || el.getAttribute("aria-label") || "");
+          if (!text || seenButtons.has(text)) return;
+          seenButtons.add(text);
+          buttons.push(text);
+        });
+        return { fields, buttons, url: location.href, title: document.title };
+      }, limit);
+    } catch {
+      return null;
+    }
+  }
+
+  // Render _pageAffordances() as a short, human-readable suffix for an error
+  // message. Additive only — callers append this to an existing message, so
+  // existing partial-match assertions on the original text keep working.
+  _describeAvailable(info) {
+    if (!info) return "";
+    const parts = [` (url: ${info.url}, title: "${info.title}")`];
+    if (info.fields.length) {
+      parts.push(` Fields on this page: ${info.fields.map(f => `"${f.label}" (${f.type})`).join(", ")}.`);
+    } else {
+      parts.push(" This page has no form fields.");
+    }
+    if (info.buttons.length) {
+      parts.push(` Buttons/links: ${info.buttons.map(b => `"${b}"`).join(", ")}.`);
+    }
+    return parts.join("");
+  }
+
+  // Catch a Playwright "not found"/timeout error from a by-name/by-text/
+  // by-label action and append _describeAvailable() to its message before
+  // rethrowing, so the agent sees what IS on the page instead of repeating
+  // the same guess. Message text only grows — the error shape is unchanged.
+  async _rethrowWithPageInfo(session, e) {
+    const info = await this._pageAffordances(session);
+    e.message = `${e.message}${this._describeAvailable(info)}`;
+    throw e;
+  }
+
   // BRW-008: dispatch a component-fill value to the right Playwright action
   // based on the matched element's tag/type, firing the same events a real
   // user interaction would (fill/selectOption/check/uncheck). Throws a clear,
   // named error instead of silently resolving when the field has no match.
-  async _fillComponentField(fieldLocator, fieldName, value, timeout) {
+  // BRW-010: the error names the fields/buttons actually on the page (or
+  // "no form fields") so a repeated-fill loop like the booking-wizard trace
+  // (12x the same wrong field name) can self-correct on the first try.
+  async _fillComponentField(fieldLocator, fieldName, value, timeout, session) {
     const count = await fieldLocator.count();
     if (count === 0) {
-      throw new Error(`component fill: field "${fieldName}" not found`);
+      const info = session ? await this._pageAffordances(session) : null;
+      throw new Error(`component fill: field "${fieldName}" not found.${this._describeAvailable(info)}`);
     }
     const target = fieldLocator.first();
     const tagName = await target.evaluate(el => el.tagName.toLowerCase()).catch(() => "");
@@ -2217,7 +2302,7 @@ class SessionManager {
     if (params.fields) {
       const fields = typeof params.fields === "string" ? JSON.parse(params.fields) : params.fields;
       for (const [name, value] of Object.entries(fields)) {
-        await this._fillComponentField(base.getByLabel(name), name, value, timeout);
+        await this._fillComponentField(base.getByLabel(name), name, value, timeout, session);
       }
       return this._afterAction(session, { filled: Object.keys(fields).length }, params.wait);
     }
@@ -2228,7 +2313,7 @@ class SessionManager {
     if (params.value == null || params.value === "") {
       throw new Error(`fill: --value is required for field "${params.field}"`);
     }
-    await this._fillComponentField(base.getByLabel(params.field), params.field, params.value, timeout);
+    await this._fillComponentField(base.getByLabel(params.field), params.field, params.value, timeout, session);
     return this._afterAction(session, { filled: 1 }, params.wait);
   }
 
@@ -2338,7 +2423,7 @@ class SessionManager {
   }
 
   async visit(sessionId, url, waitUntil) {
-    const session = await this.resolveSession(this.requireSessionId(sessionId));
+    const session = await this.resolveSession(sessionId);
     const page = session.pages[session.activeTab];
     const response = await this._navigate(page, url, waitUntil);
     const info = await this._pageInfoAsync(page, response);
@@ -2373,13 +2458,15 @@ class SessionManager {
     } catch (e) {
       if (e.message && e.message.includes("Timeout")) {
         const page = session.pages[session.activeTab];
+        const info = await this._pageAffordances(session);
         return {
           clicked: false,
           reason: "timeout",
           description,
           timeout,
           currentUrl: page.url(),
-          title: await page.title().catch(() => "")
+          title: await page.title().catch(() => ""),
+          ...(info ? { availableFields: info.fields, availableButtons: info.buttons } : {})
         };
       }
       throw e;
@@ -2589,7 +2676,11 @@ class SessionManager {
     }
     const base = this.getBase(session, params);
     const role = params.role || "textbox";
-    await base.getByRole(role, { name: params.name }).fill(params.value);
+    try {
+      await base.getByRole(role, { name: params.name }).fill(params.value, { timeout: parseInt(params.timeout) || 5000 });
+    } catch (e) {
+      await this._rethrowWithPageInfo(session, e);
+    }
     return this._afterAction(session, {}, params.wait);
   }
 
@@ -2859,7 +2950,12 @@ class SessionManager {
     const base = this.getBase(session, params);
     const role = params.role || "combobox";
     const locator = base.getByRole(role, { name: params.name }).first();
-    const element = await locator.elementHandle({ timeout });
+    let element;
+    try {
+      element = await locator.elementHandle({ timeout });
+    } catch (e) {
+      await this._rethrowWithPageInfo(session, e);
+    }
     try {
       await this._selectOn(session, element, params.value, timeout);
     } finally {
@@ -2931,7 +3027,11 @@ class SessionManager {
     }
     const base = this.getBase(session, params);
     const role = params.role || "checkbox";
-    await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
+    try {
+      await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
+    } catch (e) {
+      await this._rethrowWithPageInfo(session, e);
+    }
     return this._afterAction(session, {}, params.wait);
   }
 
@@ -2949,7 +3049,11 @@ class SessionManager {
     }
     const base = this.getBase(session, params);
     const role = params.role || "checkbox";
-    await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
+    try {
+      await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
+    } catch (e) {
+      await this._rethrowWithPageInfo(session, e);
+    }
     return this._afterAction(session, {}, params.wait);
   }
 
@@ -3269,12 +3373,12 @@ class SessionManager {
         if (params.fields) {
           const fields = typeof params.fields === "string" ? JSON.parse(params.fields) : params.fields;
           for (const [name, value] of Object.entries(fields)) {
-            await this._fillComponentField(locator.getByLabel(name), name, value, timeout);
+            await this._fillComponentField(locator.getByLabel(name), name, value, timeout, session);
           }
           return this._afterAction(session, { filled: Object.keys(fields).length }, params.wait);
         }
         if (params.value != null) {
-          await this._fillComponentField(locator, params.field || params.name || type, params.value, timeout);
+          await this._fillComponentField(locator, params.field || params.name || type, params.value, timeout, session);
           return this._afterAction(session, {}, params.wait);
         }
         throw new Error("component fill: provide --fields (json) or --value");
@@ -4015,6 +4119,7 @@ async function TypeCommand(params) {
       ref: params.ref,
       within: params.within,
       selector: params.selector,
+      timeout: params.timeout,
       wait: params.wait
     });
   }
@@ -4288,8 +4393,54 @@ async function SetSnapshotCommand(params) {
   console.log(JSON.stringify(result));
 }
 
+// BRW-010: `fill --field "Label=value"` is a very natural guess for an agent
+// that already knows curl-style repeatable flags (`-H "Header: value"`) —
+// more natural than the separate `--fields '{"Label":"value"}'` JSON map.
+// This normalizes whatever the CLI handed us (one `--field <label>` with a
+// separate `--value`, several `--field "Label=value"` flags, or a single
+// `--field "Label=value"` with no `--value`) into either the legacy
+// {field, value} pair or a {fields} map — the exact shape the daemon's
+// `fill`/`component fill` already understand, so no daemon change is
+// needed. Never breaks the plain `--field <label> --value <value>` form:
+// that only ever has one field, no "=", and an explicit value, so it always
+// falls through to the legacy branch below unchanged.
+function resolveFieldArgs(params) {
+  if (params.fields) {
+    return { field: undefined, value: undefined, fields: params.fields };
+  }
+
+  const raw = params.field;
+  const fieldArr = Array.isArray(raw) ? raw : (raw != null && raw !== "" ? [raw] : []);
+  if (fieldArr.length === 0) {
+    return { field: undefined, value: params.value, fields: undefined };
+  }
+
+  const hasEquals = fieldArr.some((f) => typeof f === "string" && f.includes("="));
+  const valueGiven = params.value != null && params.value !== "";
+
+  // Multiple --field flags, or a single one with no separate --value and an
+  // "=" in it, mean "Label=value" shorthand. A plain single --field (no "=")
+  // paired with --value, or a --field that happens to contain "=" but has an
+  // explicit --value too, always takes the legacy single-field path — so a
+  // label that genuinely contains "=" still works as long as --value is given.
+  if (fieldArr.length > 1 || (hasEquals && !valueGiven)) {
+    const fields = {};
+    for (const entry of fieldArr) {
+      const idx = typeof entry === "string" ? entry.indexOf("=") : -1;
+      if (idx < 0) {
+        throw new Error(`fill: expected --field "Label=value", got "${entry}"`);
+      }
+      fields[entry.slice(0, idx)] = entry.slice(idx + 1);
+    }
+    return { field: undefined, value: undefined, fields };
+  }
+
+  return { field: fieldArr[0], value: params.value, fields: undefined };
+}
+
 async function ComponentCommand(params) {
   const client = new DaemonClient();
+  const { field, value, fields } = resolveFieldArgs(params);
   const result = await client.send("component", {
     session: params.session,
     type: params.type,
@@ -4299,9 +4450,9 @@ async function ComponentCommand(params) {
     col: params.col,
     where: params.where,
     item: params.item,
-    field: params.field,
-    fields: params.fields,
-    value: params.value,
+    field,
+    fields,
+    value,
     tab: params.tab,
     path: params.path,
     title: params.title,
@@ -4313,11 +4464,12 @@ async function ComponentCommand(params) {
 
 async function FillCommand(params) {
   const client = new DaemonClient();
+  const { field, value, fields } = resolveFieldArgs(params);
   const result = await client.send("fill", {
     session: params.session,
-    field: params.field,
-    value: params.value,
-    fields: params.fields,
+    field,
+    value,
+    fields,
     within: params.within,
     timeout: params.timeout,
     wait: params.wait
@@ -4401,7 +4553,7 @@ const commands = {
   mouse:       { handler: MouseCommand,    args: ["session", "action", "x", "y", "steps", "selector", "within"] },
   "click-text": { handler: ClickTextCommand, args: ["session", "text", "index", "within", "wait"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
-  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "ref", "within", "selector", "wait"] },
+  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "ref", "within", "selector", "timeout", "wait"] },
   scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount", "to"] },
   content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output", "wait"] },
   screenshot:  { handler: ScreenshotCommand, args: ["session", "output", "fullPage"] },

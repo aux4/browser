@@ -10,6 +10,6 @@ aux4 browser screenshot --session <id> [--output screenshot.png] [--fullPage fal
 
 ## Options
 
-- `--session` — Session ID (required)
+- `--session` — Session ID; defaults to the most recently used open session when omitted
 - `--output` — Output file path (default: screenshot.png)
 - `--fullPage` — Capture full page (default: false)

@@ -10,7 +10,7 @@ aux4 browser save-pdf --session <id> [--output page.pdf] [--format Letter] [--pr
 
 ## Options
 
-- `--session` — Session ID (required)
+- `--session` — Session ID; defaults to the most recently used open session when omitted
 - `--output` — Output file path (default: page.pdf)
 - `--format` — Paper format: Letter, A4, Legal, Tabloid
 - `--printBackground` — Include background graphics (default: false)

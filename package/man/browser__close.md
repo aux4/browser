@@ -25,7 +25,7 @@ session as already closed.
 aux4 browser close --session <id>
 ```
 
-    --session   Session ID, as returned by `browser open` (required)
+    --session   Session ID, as returned by `browser open`; defaults to the most recently used open session when omitted
 
 #### Example
 

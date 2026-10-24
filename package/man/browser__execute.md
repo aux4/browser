@@ -10,7 +10,7 @@ aux4 browser execute --session <id> --instructions <file>
 
 ## Options
 
-- `--session` — Session ID (required)
+- `--session` — Session ID; defaults to the most recently used open session when omitted
 - `--instructions` — Path to instructions file (required)
 
 ## Instructions Format

@@ -1,5 +1,30 @@
 # Release notes
 
+## Unreleased
+
+Agent-ergonomics follow-up (BRW-010), from a dojo booking-wizard trace (78 calls / 49 failed) and a contact-form
+trace hit in the dojo container:
+
+- **`--session` is now optional on every command that takes one**, not just `visit`. Omitted, it falls back to
+  the only open session, or the most recently opened/used one if several are open; with no session open at all,
+  it errors naming the exact command to run (`aux4 browser open --url <url>`) instead of the generic aux4
+  "Error to enter the value of session" prompt failure.
+- **"Field not found" / element-not-matched errors from `fill`, `component fill`, `type`, `select`, `check`, and
+  `uncheck`** now also list the fields and buttons/links actually on the page (label + type, capped at 15 each),
+  or say the page has no form fields, plus the current url/title — so a wrong guess can self-correct on the next
+  call instead of repeating the same mistake. `click`'s by-name/role timeout result gains the same
+  `availableFields`/`availableButtons` lists. Additive only: existing error-message substring checks still match.
+- **`fill --field` (and `component --action fill --field`) is now repeatable as `"Label=value"`**, e.g.
+  `--field "Email=a@b.com" --field "Name=Ann"` — the curl `-H "Header: value"`-style shortcut for
+  `--fields '{"Label":"value"}'`, and the natural (but previously silently-broken) guess an agent reaches for
+  before learning about `--fields`. A single `--field "Label=value"` with no separate `--value` works the same
+  way. The original `--field <label> --value <value>` single-field form is unchanged; a repeated `--field`
+  missing the `=` separator errors naming the expected form.
+- `type`'s by-name/role path now honors `--timeout` (new flag, default 5000ms) instead of always waiting
+  Playwright's 30s default.
+- `component`'s help, and the top-level `browser --help`/man page, now point to `fill` as the simpler way to
+  fill one form field instead of `component --type form --action fill`.
+
 ## 1.0.35
 
 Page-settle wait (BRW-009): a page that renders its real content after the load event — a delayed `fetch`, an

@@ -2,6 +2,11 @@
 
 Headless browser automation with daemon architecture and multi-agent session management.
 
+Every command below that takes `--session` can omit it: when omitted, it falls back to the only open session,
+or the most recently opened/used one if several are open — the same session `open` just returned. If no session
+is open at all, the command errors naming the exact command to run (`aux4 browser open --url <url>`) instead of
+hanging on an interactive prompt or failing with an opaque "value of session" error.
+
 #### Usage
 
 ```bash
@@ -27,6 +32,7 @@ aux4 browser <command> [options]
 
 **Interaction:**
 
+- `fill` — Fill one form field (or a JSON map of fields) by its visible label — **the usual way to fill a form**
 - `click` — Click an element by role and accessible name
 - `click-text` — Click an element by text content
 - `click-selector` — Click an element by CSS selector
@@ -47,7 +53,7 @@ aux4 browser <command> [options]
 - `screenshot` — Take a screenshot
 - `snapshot` — Get an accessibility snapshot of the page
 - `blocks` — Split the page into content blocks (headings, paragraphs, cards, table rows) via a deterministic DOM walk
-- `component` — Interact with structured UI components
+- `component` — Interact with a UI component *structurally* (table, list, nav, menu, dialog, tab, tree, card). To fill a single form field, use `fill` instead of `component --type form --action fill`
 
 **Assertions:**
 

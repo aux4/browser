@@ -50,7 +50,7 @@ Works against any active session, local or remote (`--provider cdp`/`agentcore`)
 aux4 browser blocks --session <id> [--url <url>] [--waitUntil load] [--maxBlockChars 1500] [--includeNav false] [--wait <ms>]
 ```
 
-    --session        Session ID (required)
+    --session        Session ID; defaults to the most recently used open session when omitted
     --url            Navigate to this URL first; omit to block the current page
     --waitUntil      Navigation wait strategy when --url is given: domcontentloaded, load, networkidle, settle. Default: load
     --maxBlockChars  Cap each block's text at this many characters. Default: 1500

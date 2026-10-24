@@ -177,8 +177,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "within",
@@ -206,20 +206,21 @@
         {
           "name": "fill",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs fill values(session,field,value,fields,within,timeout,wait)"
+            "node ${packageDir}/lib/aux4-browser.mjs fill values(session,field*,value,fields,within,timeout,wait)"
           ],
           "help": {
             "text": "Fill a form field (or a JSON map of fields) by its visible label",
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "field",
-                "text": "Visible label of the field to fill",
-                "default": ""
+                "text": "Visible label of the field to fill. Repeatable as --field \"Label=value\" (e.g. --field \"Name=Ann\" --field \"Email=a@b.com\") instead of --fields json, or a single --field <label> paired with --value",
+                "default": "",
+                "multiple": true
               },
               {
                 "name": "value",
@@ -252,15 +253,15 @@
         {
           "name": "type",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,ref,within,selector,wait)"
+            "node ${packageDir}/lib/aux4-browser.mjs type values(session,name*,value*,role,ref,within,selector,timeout,wait)"
           ],
           "help": {
             "text": "Type text into an input field",
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "name",
@@ -295,6 +296,11 @@
                 "default": ""
               },
               {
+                "name": "timeout",
+                "text": "Timeout in milliseconds",
+                "default": "5000"
+              },
+              {
                 "name": "wait",
                 "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
                 "default": ""
@@ -312,8 +318,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "name",
@@ -363,8 +369,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "name",
@@ -409,8 +415,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "name",
@@ -455,8 +461,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "name",
@@ -542,8 +548,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "selector",
@@ -578,8 +584,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "mode",
@@ -614,8 +620,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               }
             ]
           }
@@ -709,8 +715,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               }
             ]
           }
@@ -725,8 +731,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               }
             ]
           }
@@ -741,8 +747,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               }
             ]
           }
@@ -757,8 +763,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "selector",
@@ -788,8 +794,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "action",
@@ -834,8 +840,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "text",
@@ -870,8 +876,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "direction",
@@ -901,8 +907,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "name",
@@ -927,8 +933,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "key",
@@ -953,8 +959,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "name",
@@ -979,8 +985,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "name",
@@ -1005,8 +1011,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "output",
@@ -1031,8 +1037,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "selector",
@@ -1057,8 +1063,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "selector",
@@ -1093,8 +1099,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "item",
@@ -1119,8 +1125,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "assertion",
@@ -1155,8 +1161,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "selector",
@@ -1176,8 +1182,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "instructions",
@@ -1197,8 +1203,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "script",
@@ -1223,8 +1229,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "export",
@@ -1258,8 +1264,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "url",
@@ -1284,8 +1290,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "output",
@@ -1315,8 +1321,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "selector",
@@ -1336,8 +1342,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               }
             ]
           }
@@ -1352,8 +1358,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "mode",
@@ -1373,8 +1379,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "url",
@@ -1394,8 +1400,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "tab",
@@ -1415,8 +1421,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "tab",
@@ -1436,8 +1442,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               }
             ]
           }
@@ -1496,15 +1502,15 @@
         {
           "name": "component",
           "execute": [
-            "node ${packageDir}/lib/aux4-browser.mjs component values(session,type,action,name,row,col,where,item,field,fields,value,tab,path,title,timeout,wait)"
+            "node ${packageDir}/lib/aux4-browser.mjs component values(session,type,action,name,row,col,where,item,field*,fields,value,tab,path,title,timeout,wait)"
           ],
           "help": {
-            "text": "Interact with a UI component structurally (table, form, list, nav, menu, dialog, tab, tree, card)",
+            "text": "Interact with a UI component structurally (table, form, list, nav, menu, dialog, tab, tree, card). To fill ONE form field by its label, prefer the simpler `aux4 browser fill --field <label> --value <value>` instead of `component --type form --action fill`.",
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "type",
@@ -1513,7 +1519,7 @@
               },
               {
                 "name": "action",
-                "text": "Action: locate, click, hover, read, count, bounds, fill, scroll",
+                "text": "Action: locate, click, hover, read, count, bounds, fill, scroll. For `fill` on a single field, prefer the top-level `fill` command.",
                 "default": "locate",
                 "arg": true
               },
@@ -1544,8 +1550,9 @@
               },
               {
                 "name": "field",
-                "text": "Form field label",
-                "default": ""
+                "text": "Form field label. For --action fill, repeatable as --field \"Label=value\" (e.g. --field \"Name=Ann\" --field \"Email=a@b.com\"), or a single --field <label> paired with --value",
+                "default": "",
+                "multiple": true
               },
               {
                 "name": "fields",
@@ -1595,8 +1602,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID",
-                "required": true
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "url",
@@ -1641,7 +1648,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID (local or provider-backed, e.g. cdp:...)"
+                "text": "Session ID (local or provider-backed, e.g. cdp:...); defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "output",
@@ -1661,7 +1669,8 @@
             "variables": [
               {
                 "name": "session",
-                "text": "Session ID (local or provider-backed, e.g. cdp:...)"
+                "text": "Session ID (local or provider-backed, e.g. cdp:...); defaults to the most recently used session when omitted",
+                "default": ""
               },
               {
                 "name": "file",

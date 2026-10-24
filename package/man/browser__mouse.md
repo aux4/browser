@@ -21,7 +21,7 @@ aux4 browser mouse --session <id> [--action move|click|down|up] --x <px> --y <px
 aux4 browser mouse --session <id> [--action click] --selector <css> [--within <iframe-css>] [--steps 20]
 ```
 
-    --session   Session ID (required)
+    --session   Session ID; defaults to the most recently used open session when omitted
     --action    move | click | down | up (default: click)
     --x         Target viewport X coordinate (ignored when --selector is given)
     --y         Target viewport Y coordinate (ignored when --selector is given)
