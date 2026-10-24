@@ -291,3 +291,25 @@ exit:1
 ```error:partial
 component fill: field \"No Such Field\" not found
 ```
+
+### should point to `fill` when given a field-level type instead of a structural one
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/component-fixture.html")
+aux4 browser component --session $SESSION --type input --action locate
+EXIT=$?
+aux4 browser close --session $SESSION >/dev/null
+echo "exit:$EXIT"
+```
+
+```expect:partial
+exit:1
+```
+
+```error:partial
+aux4 browser fill --session *?
+```

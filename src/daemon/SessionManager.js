@@ -544,6 +544,34 @@ export class SessionManager {
     await target.fill(String(value), { timeout });
   }
 
+  // Top-level `fill` (distinct from `component fill`): an agent reaching for
+  // "fill" naturally expects to act on ONE field by its label, with no
+  // component type to pick first. Shares _fillComponentField so text/select/
+  // checkbox/radio all dispatch correctly, and shares the after-action
+  // reporting every other write command uses.
+  async fill(sessionId, params) {
+    const session = await this.resolveSession(sessionId);
+    const base = this.getBase(session, params);
+    const timeout = parseInt(params.timeout) || 5000;
+
+    if (params.fields) {
+      const fields = typeof params.fields === "string" ? JSON.parse(params.fields) : params.fields;
+      for (const [name, value] of Object.entries(fields)) {
+        await this._fillComponentField(base.getByLabel(name), name, value, timeout);
+      }
+      return this._afterAction(session, { filled: Object.keys(fields).length });
+    }
+
+    if (!params.field) {
+      throw new Error(`fill: provide --field <label> --value <value>, or --fields '{"Label":"value",...}'`);
+    }
+    if (params.value == null || params.value === "") {
+      throw new Error(`fill: --value is required for field "${params.field}"`);
+    }
+    await this._fillComponentField(base.getByLabel(params.field), params.field, params.value, timeout);
+    return this._afterAction(session, { filled: 1 });
+  }
+
   async screenshotOnError(session) {
     if (!session.outputDir) return null;
     try {
@@ -623,8 +651,34 @@ export class SessionManager {
     return result;
   }
 
+  // No --session given (a common agent slip — `visit` needs one, `open`
+  // doesn't): fall back to the most recently active session instead of
+  // failing outright, same as a person who just ran `open` and typed the
+  // next command without re-pasting the id. Only kicks in when sessionId is
+  // genuinely empty; a wrong/stale id still fails loudly via resolveSession.
+  mostRecentSessionId() {
+    let bestId = null;
+    let bestActivity = -1;
+    for (const [id, session] of this.sessions) {
+      if (session.lastActivity > bestActivity) {
+        bestActivity = session.lastActivity;
+        bestId = id;
+      }
+    }
+    return bestId;
+  }
+
+  requireSessionId(sessionId) {
+    if (sessionId) return sessionId;
+    const fallback = this.mostRecentSessionId();
+    if (fallback) return fallback;
+    throw new Error(
+      "No --session given and no active sessions. Run: aux4 browser open --url <url>"
+    );
+  }
+
   async visit(sessionId, url, waitUntil) {
-    const session = await this.resolveSession(sessionId);
+    const session = await this.resolveSession(this.requireSessionId(sessionId));
     const page = session.pages[session.activeTab];
     const response = await this._navigate(page, url, waitUntil);
     const info = await this._pageInfoAsync(page, response);

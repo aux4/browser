@@ -1,5 +1,27 @@
 # Release notes
 
+## 1.0.33
+
+Agent-ergonomics follow-up (BRW-009), from real agent transcripts driving the browser through `executeAux4`:
+
+- `open` and `visit` take `--url` as a positional argument (`aux4 browser open <url>`, `aux4 browser visit <url>`),
+  matching what an agent naturally types instead of only accepting `--url`/`--session --url`.
+- `visit` no longer requires `--session`: when omitted it falls back to the most recently used active session;
+  with no active session at all it errors naming the exact command to run (`aux4 browser open --url <url>`)
+  instead of hanging on an interactive prompt.
+- New top-level `fill` command: fills one field by its visible label (`--field`/`--value`) or several at once
+  (`--fields <json map>`), sharing the `component fill` dispatch logic (text/select/checkbox/radio) and the
+  after-action `{status,url,title,errors}` reporting every write command already returns.
+- `component --type <field-level-type>` (e.g. `input`, `button`) now errors naming the exact command to use
+  instead (`aux4 browser fill`/`type`/`select`/`click`), since `component` is for structural containers (table,
+  form, list, nav, menu, dialog, tab, tree, card), not individual fields.
+- `--help` lists the everyday commands first in the `browser` group: `start`, `stop`, `open`, `actions`, `fill`,
+  `type`, `select`, `check`, `uncheck`, `click`, `read`, `content`, `snapshot`, then the rest.
+- The `mock-open`/`mock-attach`/`mock-close`/`broken-open` test fixtures used to exercise the provider seam
+  (CBR-008) without a real cloud provider are no longer part of the published command surface — they moved from
+  `package/.aux4` into a test-only `package/test/.aux4` loaded only when tests run from that directory, so an
+  installed `aux4/browser` never lists them.
+
 ## 1.0.32
 
 Integration build (CBR-052 line + BRW-008): combines the `actions`/`blocks`/`component`

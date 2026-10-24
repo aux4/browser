@@ -1,0 +1,63 @@
+{
+  "profiles": [
+    {
+      "name": "browser",
+      "commands": [
+        {
+          "name": "mock-open",
+          "private": true,
+          "execute": [
+            "echo '{\"token\":\"tok-abc\",\"wsUrl\":\"ws://127.0.0.1:1/mock\",\"headers\":{}}'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: fake provider-open used by browser package tests to exercise the provider seam without AWS. Never a real provider."
+          }
+        },
+        {
+          "name": "mock-attach",
+          "private": true,
+          "execute": [
+            "echo '{\"wsUrl\":\"ws://127.0.0.1:1/mock\",\"headers\":{}}'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: fake provider-attach used by browser package tests to exercise the provider seam without AWS. Never a real provider.",
+            "variables": [
+              {
+                "name": "token",
+                "text": "opaque token (ignored by the fixture)",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "mock-close",
+          "private": true,
+          "execute": [
+            "echo '{\"status\":\"closed\"}'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: fake provider-close used by browser package tests to exercise the provider seam without AWS. Never a real provider.",
+            "variables": [
+              {
+                "name": "token",
+                "text": "opaque token (ignored by the fixture)",
+                "arg": true
+              }
+            ]
+          }
+        },
+        {
+          "name": "broken-open",
+          "private": true,
+          "execute": [
+            "echo 'not-json'"
+          ],
+          "help": {
+            "text": "TEST FIXTURE ONLY: a provider-open that returns invalid JSON, used to test that the provider seam fails loudly instead of falling back to a local browser."
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -12,13 +12,15 @@ Each session is an isolated Playwright BrowserContext with its own cookies, stor
 - **User agent** — every session presents a regular Chrome user agent (with matching client hints): `HeadlessChrome` becomes `Chrome`, and a remote provider's automation token (e.g. AgentCore's `Amazon-Bedrock-AgentCore-Browser/1.0 (...)`) is removed. Set `AUX4_BROWSER_USER_AGENT=keep` in the daemon's environment to keep the browser's own user agent, or to any other value to use that exact string.
 - **`--awsProfile` / `--awsRegion`** — Forwarded as-is to the selected provider when it needs AWS credentials/region (e.g. `agentcore`); ignored for `--provider local`.
 
+`--url` is positional, so `aux4 browser open https://example.com` works the same as `aux4 browser open --url https://example.com`.
+
 #### Usage
 
 ```bash
-aux4 browser open [--url <url>] [--timeout 10m] [--width 1280] [--height 720] [--output <dir>] [--video off] [--snapshot off] [--waitUntil load] [--provider local] [--awsProfile <profile>] [--awsRegion <region>] [--cdpUrl <ws-url>]
+aux4 browser open [<url>] [--timeout 10m] [--width 1280] [--height 720] [--output <dir>] [--video off] [--snapshot off] [--waitUntil load] [--provider local] [--awsProfile <profile>] [--awsRegion <region>] [--cdpUrl <ws-url>]
 ```
 
-    --url         URL to navigate to
+    --url         URL to navigate to (positional)
     --timeout     Session idle timeout (e.g. 10m, 1h). Default: 10m
     --width       Viewport width (--provider local only). Default: 1280
     --height      Viewport height (--provider local only). Default: 720
@@ -34,7 +36,10 @@ aux4 browser open [--url <url>] [--timeout 10m] [--width 1280] [--height 720] [-
 #### Example
 
 ```bash
-# Basic session
+# Basic session (positional url)
+aux4 browser open https://example.com
+
+# Same thing, with the flag
 aux4 browser open --url https://example.com
 
 # Session with auto-snapshots for AI agent use

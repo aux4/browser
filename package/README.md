@@ -45,7 +45,7 @@ Each session is an isolated Playwright BrowserContext with its own cookies, stor
 # Start the daemon
 aux4 browser start
 
-# Open a session
+# Open a session (--url is positional, so this also works: aux4 browser open https://example.com)
 aux4 browser open --url https://example.com --timeout 10m
 
 # List active sessions
@@ -127,13 +127,36 @@ remote sessions never needs a local browser installed.
 ### Navigation
 
 ```bash
-aux4 browser visit --session <id> --url https://example.com
+aux4 browser visit --session <id> https://example.com
 aux4 browser back --session <id>
 aux4 browser forward --session <id>
 aux4 browser reload --session <id>
 ```
 
+`visit`'s `--url` is positional, so `aux4 browser visit <url>` works without typing `--url`. `--session` can be
+omitted too — it then falls back to the most recently used session; if no session is active, `visit` errors
+naming the exact `open` command to run instead of hanging or guessing.
+
 Pages load using the `domcontentloaded` strategy, which considers navigation complete once the HTML is fully parsed. This is faster than waiting for all network requests to finish, making page transitions more responsive.
+
+### Filling a field by label
+
+`fill` writes a value straight into a field by its visible label, with no component type to pick first — the
+natural first thing an agent reaches for on a form:
+
+```bash
+# One field
+aux4 browser fill --session <id> --field "Email" --value "user@test.com"
+
+# Several fields in one call
+aux4 browser fill --session <id> --fields '{"Email":"user@test.com","Password":"secret"}'
+```
+
+`fill` dispatches per the matched element — `fill()` for text/email/date/textarea, `selectOption()` by label for
+a `<select>`, `check()`/`uncheck()` for a checkbox or radio based on a truthy `--value` (`true`, `1`, `yes`,
+`on`). A field that cannot be matched by its label always errors (`fill: field "X" not found`), never silently
+no-ops. Every call reports `{status, url, title, errors}` so you know immediately whether the page changed or a
+validation message appeared — never a bare `{"status":"ok"}`.
 
 ### Interaction
 
@@ -407,7 +430,10 @@ aux4 browser component --session <id> --type list --action count
 aux4 browser component --session <id> --type nav --action scroll --name "Footer"
 ```
 
-Supported types: `table`, `form`, `list`, `nav`, `menu`, `dialog`, `tab`, `tree`, `card`.
+Supported types: `table`, `form`, `list`, `nav`, `menu`, `dialog`, `tab`, `tree`, `card` — all *structural* UI
+(a container with rows/items/fields inside it). For a single field or control, use the top-level `fill` /
+`type` / `select` / `check` / `click` commands instead; `component` with any other `--type` (e.g. `input`,
+`button`) fails naming the exact command to use instead of guessing.
 
 Actions: `locate`, `click`, `hover`, `read`, `count`, `bounds`, `fill`, `scroll`. `--action` can be passed either as a flag (`--action fill`) or as the bare word right after `component` (`component fill ...`).
 

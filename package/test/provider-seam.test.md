@@ -1,7 +1,8 @@
 # Provider seam (--provider on open/close)
 
 These tests exercise aux4/browser core's provider seam (CBR-008) without any real cloud provider: `mock-open`
-/ `mock-attach` / `mock-close` / `broken-open` are TEST-FIXTURE-ONLY private commands (see package/.aux4) that
+/ `mock-attach` / `mock-close` / `broken-open` are TEST-FIXTURE-ONLY private commands (see `package/test/.aux4`
+— kept out of the published package manifest so the installed command surface never lists them) that
 stand in for a plugin like aux4/browser-agentcore. They return a `wsUrl` core cannot actually connect to
 (`ws://127.0.0.1:1/mock`, a refused connection), so what's being verified is the DISPATCH and ERROR HANDLING of
 the seam — that core calls out to `<provider>-open`/`-attach`/`-close`, hands the response straight to

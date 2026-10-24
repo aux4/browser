@@ -130,7 +130,12 @@ export class ComponentResolver {
   static async resolve(base, type, params = {}) {
     const fn = RESOLVERS[type];
     if (!fn) {
-      throw new Error(`Unknown component type: "${type}". Available: ${Object.keys(RESOLVERS).join(", ")}`);
+      throw new Error(
+        `Unknown component type: "${type}". "component" is for structural UI (table, form, list, nav, menu, ` +
+        `dialog, tab, tree, card) — available types: ${Object.keys(RESOLVERS).join(", ")}. ` +
+        `To act on a single field/control by its label, use: aux4 browser fill --session <session> --field "<label>" --value <value> ` +
+        `(or type/select/check/click for that one control).`
+      );
     }
     return await fn(base, params);
   }
