@@ -1,6 +1,6 @@
 # Release notes
 
-## 1.0.37
+## 1.0.38
 
 Agent-ergonomics follow-up (BRW-011), from a dojo contact-form trace: after a successful `fill` (`filled:4`)
 the agent called `browser submit` twice (the command didn't exist) and `wait --condition ...` (the wrong flag)
