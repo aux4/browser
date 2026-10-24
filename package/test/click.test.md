@@ -39,6 +39,41 @@ aux4 browser close --session $SESSION >/dev/null 2>&1
 ok
 ```
 
+### should report the resulting url, title and a visible validation error after clicking
+
+```timeout
+30000
+```
+
+```file:click-validation-fixture.html
+<html>
+<head><title>Signup</title></head>
+<body>
+  <button id="submit" onclick="document.getElementById('err').style.display='block'">Submit</button>
+  <div role="alert" id="err" style="display:none">Name is required</div>
+</body>
+</html>
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/click-validation-fixture.html" 2>/dev/null)
+aux4 browser click-selector --session $SESSION --selector "#submit" 2>/dev/null | node -e "
+  const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+  console.log('status:' + d.status);
+  console.log('hasUrl:' + !!d.url);
+  console.log('title:' + d.title);
+  console.log('errors:' + (d.errors || []).join(','));
+"
+aux4 browser close --session $SESSION >/dev/null 2>&1
+```
+
+```expect
+status:ok
+hasUrl:true
+title:Signup
+errors:Name is required
+```
+
 ### should return structured timeout on click failure
 
 ```timeout

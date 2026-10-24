@@ -328,13 +328,24 @@ Modes: `off` (default), `auto` (~50 elements), `full` (all elements).
 
 `actions` lists every control a person could use on the page — fields, buttons, links, options and clickable
 elements with no role (suggestion items, cards), inside open shadow roots and visible iframes too — with its label,
-current value, context (dialog/landmark and heading path), the snapshot `ref` when it has one and a `selector`
-(+ `within` for iframes) that addresses it exactly. Page chrome (header/nav/footer/aside) is skipped unless
+current value, context (dialog/landmark and heading path), the snapshot `ref` when it has one, a `selector`
+(+ `within` for iframes) that addresses it exactly, and a `how` field: the exact aux4 command to act on it right
+now (e.g. `browser type --ref 5 --value "..."`, `browser click --selector '[data-aux4-el="3"]'`). An agent never
+has to guess which command a role maps to. Page chrome (header/nav/footer/aside) is skipped unless
 `--includeNav true`; `--page true` adds the page's headings, error messages and text.
 
 ```bash
 aux4 browser actions --session $SESSION
 aux4 browser click-selector --session $SESSION --selector '[data-aux4-el="3"]'
+```
+
+Every action command (`click`, `click-selector`, `click-text`, `type`, `select`, `check`, `uncheck`, `component
+fill`, ...) reports what changed right after acting — the resulting `url` and `title`, and any visible
+validation/error text in an `errors` array — so an agent knows immediately whether the action navigated, surfaced
+a validation error, or did nothing visible, without a separate `read`/`snapshot` call:
+
+```json
+{ "status": "ok", "url": "https://example.com/signup", "title": "Sign Up", "errors": ["Name is required"] }
 ```
 
 ### Content Blocks

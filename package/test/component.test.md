@@ -178,6 +178,29 @@ aux4 browser close --session $SESSION >/dev/null
 Ada Lovelace
 ```
 
+### should report the resulting url and title after filling a field
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/component-fixture.html")
+aux4 browser component fill --session $SESSION --type form --name Contact --field Name --value "Ada Lovelace" | node -e "
+  const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+  console.log('status:' + d.status);
+  console.log('hasUrl:' + !!d.url);
+  console.log('hasTitle:' + (d.title !== undefined));
+"
+aux4 browser close --session $SESSION >/dev/null
+```
+
+```expect
+status:ok
+hasUrl:true
+hasTitle:true
+```
+
 ### should fill a textarea
 
 ```timeout

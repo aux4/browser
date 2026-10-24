@@ -20,6 +20,10 @@ Each entry has:
   select), `href`/`target` (links), `autocomplete` (a field that lists suggestions)
 - **`context`** — `region` (`dialog`, `list`, `main`, `form`, `header`, `nav`, `footer`, `aside`, `page`), its `name`,
   the `headingPath` above the control and a one-line `text`
+- **`how`** — the exact aux4 command to act on this control right now, e.g. `browser type --ref 5 --value "..."`,
+  `browser select --ref 7 --value "<option>"`, `browser check --ref 9` / `browser uncheck --ref 9`, or
+  `browser click --ref 3`. Uses `--ref` when the control has one (valid only against this snapshot), otherwise
+  `--selector` (+ `--within` for iframe controls). An agent never needs to guess which command a role maps to.
 
 Controls in page chrome (header, nav, footer, aside) are skipped unless `--includeNav true`. With `--page true` the
 result also carries `page`: the visible `headings`, visible error messages (`errors`), the start of the main text
@@ -55,7 +59,8 @@ aux4 browser actions --session 1694f329
       "tag": "button",
       "label": "Location",
       "context": { "region": "main", "headingPath": ["Find a doctor", "Where"], "text": "main > Where" },
-      "selector": "[data-aux4-el=\"1\"]"
+      "selector": "[data-aux4-el=\"1\"]",
+      "how": "browser click --ref 5"
     },
     {
       "id": 3,
@@ -64,15 +69,28 @@ aux4 browser actions --session 1694f329
       "tag": "div",
       "label": "Venice, CA 90292",
       "context": { "region": "main", "headingPath": ["Find a doctor", "Where"], "text": "main > Where" },
-      "selector": "[data-aux4-el=\"3\"]"
+      "selector": "[data-aux4-el=\"3\"]",
+      "how": "browser click --selector '[data-aux4-el=\"3\"]'"
     }
   ],
   "count": 2
 }
 ```
 
-Act on an entry:
+Act on an entry — run the `how` command as-is, or build it from `ref`/`selector` yourself:
 
 ```bash
 aux4 browser click-selector --session 1694f329 --selector '[data-aux4-el="3"]'
+```
+
+Every action command (`click`, `click-selector`, `type`, `select`, `check`, `uncheck`, `component fill`, ...)
+reports the resulting `url`, `title`, and any visible validation/error text (`errors`) right after acting, so an
+agent knows immediately whether the action navigated, showed a validation error, or did nothing visible:
+
+```json
+{ "status": "ok", "url": "https://example.com/find-care", "title": "Find Care" }
+```
+
+```json
+{ "status": "ok", "url": "https://example.com/signup", "title": "Sign Up", "errors": ["Name is required"] }
 ```

@@ -135,6 +135,28 @@ ok
 true
 ```
 
+### should give each control a how command that names the right aux4 action
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/actions.html" 2>/dev/null)
+aux4 browser click-selector --session $SESSION --selector "#loc" > /dev/null
+aux4 browser actions --session $SESSION | node -e "
+  const o = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+  for (const a of o.actions) console.log(a.label, '=>', a.how);
+"
+aux4 browser close --session $SESSION > /dev/null
+```
+
+```expect:partial
+City or ZIP code => browser type --ref *?
+Venice, CA 90292 => browser click --selector *?
+Apply => browser click --ref *?
+```
+
 ### should add headings, errors and text with --page true
 
 ```timeout

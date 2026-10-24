@@ -1079,7 +1079,37 @@ function shape(item, within) {
   };
   out.selector = `[data-aux4-el="${item.id}"]`;
   if (within) { out.within = within; out.ref = null; }
+  out.how = howTo(out, within);
   return out;
+}
+
+// Spell out the exact aux4 command to act on this control, so an agent never
+// has to infer which command a role maps to. --ref when the control has one
+// (works on the current snapshot only), otherwise --selector (+ --within).
+function howTo(out, within) {
+  const target = out.ref != null ? `--ref ${out.ref}` : `--selector '${out.selector}'${within ? ` --within '${within}'` : ""}`;
+  switch (out.role) {
+    case "textbox":
+    case "searchbox":
+    case "segmented":
+      return `browser type ${target} --value "..."`;
+    case "combobox":
+    case "select":
+      return `browser select ${target} --value "<option>"`;
+    case "checkbox":
+    case "switch":
+    case "radio":
+      return out.checked ? `browser uncheck ${target}` : `browser check ${target}`;
+    case "button":
+    case "link":
+    case "option":
+    case "menuitem":
+    case "tab":
+    case "card":
+      return `browser click ${target}`;
+    default:
+      return `browser click ${target}`;
+  }
 }
 
 class ActionsBuilder {
@@ -2023,6 +2053,40 @@ class SessionManager {
     return result;
   }
 
+  // Agent-friendliness: an action (click/type/select/check/fill/...) tells the
+  // caller what changed, not just "ok". Reads the page's current url/title and
+  // any visible validation/error text right after the action — so an agent
+  // acting by label knows immediately whether the click navigated, a submit
+  // showed a validation error, or nothing visibly happened.
+  async _afterAction(session, extra = {}) {
+    let info = null;
+    try {
+      const page = session.pages[session.activeTab];
+      info = await page.evaluate(() => {
+        const norm = (s) => String(s || "").replace(/\s+/g, " ").trim();
+        const errs = [];
+        ["[role=\"alert\"]", ".error", ".invalid", ".validation-error", "[aria-invalid=\"true\"]"].forEach((sel) => {
+          document.querySelectorAll(sel).forEach((el) => {
+            const r = el.getBoundingClientRect();
+            if (r.width < 1 || r.height < 1) return;
+            const t = norm(el.textContent);
+            if (t && !errs.includes(t)) errs.push(t);
+          });
+        });
+        return { url: location.href, title: document.title, errors: errs.slice(0, 5) };
+      });
+    } catch {
+      // page may have navigated away or closed mid-action; still report the action result
+    }
+    const result = { status: "ok", ...extra };
+    if (info) {
+      result.url = info.url;
+      result.title = info.title;
+      if (info.errors.length) result.errors = info.errors;
+    }
+    return this._attachSnapshot(session, result);
+  }
+
   // BRW-008: dispatch a component-fill value to the right Playwright action
   // based on the matched element's tag/type, firing the same events a real
   // user interaction would (fill/selectOption/check/uncheck). Throws a clear,
@@ -2169,7 +2233,7 @@ class SessionManager {
   async _clickWithTimeout(session, locator, timeout, description) {
     try {
       await locator.click({ timeout });
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     } catch (e) {
       if (e.message && e.message.includes("Timeout")) {
         const page = session.pages[session.activeTab];
@@ -2311,7 +2375,7 @@ class SessionManager {
         return false;
       }, ref);
       if (!clicked) throw new Error(`Snapshot ref [${ref}] not found on page`);
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     }
 
     const base = this.getBase(session, params);
@@ -2379,18 +2443,18 @@ class SessionManager {
     if (params.selector) {
       // CSS selector (pierces open shadow roots; --within for iframes)
       await this.getBase(session, params).locator(params.selector).first().fill(params.value, { timeout: parseInt(params.timeout) || 5000 });
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.fill(params.value);
       await element.dispose();
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     }
     const base = this.getBase(session, params);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).fill(params.value);
-    return this._attachSnapshot(session, { status: "ok" });
+    return this._afterAction(session);
   }
 
   async scroll(sessionId, params) {
@@ -2643,7 +2707,7 @@ class SessionManager {
       } finally {
         await element.dispose();
       }
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
@@ -2652,7 +2716,7 @@ class SessionManager {
       } finally {
         await element.dispose();
       }
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     }
     const base = this.getBase(session, params);
     const role = params.role || "combobox";
@@ -2663,7 +2727,7 @@ class SessionManager {
     } finally {
       await element.dispose();
     }
-    return this._attachSnapshot(session, { status: "ok" });
+    return this._afterAction(session);
   }
 
   // A native <select> takes selectOption. A custom combobox (a div/mat-select/
@@ -2719,36 +2783,36 @@ class SessionManager {
     const session = await this.resolveSession(sessionId);
     if (params.selector) {
       await this.getBase(session, params).locator(params.selector).first().check({ timeout: parseInt(params.timeout) || 5000 });
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.check({ timeout: parseInt(params.timeout) || 5000 });
       await element.dispose();
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     }
     const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    return this._afterAction(session);
   }
 
   async uncheck(sessionId, params) {
     const session = await this.resolveSession(sessionId);
     if (params.selector) {
       await this.getBase(session, params).locator(params.selector).first().uncheck({ timeout: parseInt(params.timeout) || 5000 });
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     }
     if (params.ref != null && params.ref !== "") {
       const element = await this._resolveRefElement(session, params.ref);
       await element.uncheck({ timeout: parseInt(params.timeout) || 5000 });
       await element.dispose();
-      return this._attachSnapshot(session, { status: "ok" });
+      return this._afterAction(session);
     }
     const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
-    return this._attachSnapshot(session, { status: "ok" });
+    return this._afterAction(session);
   }
 
   async hover(sessionId, params) {
@@ -3022,7 +3086,7 @@ class SessionManager {
       }
       case "click": {
         await locator.first().click({ timeout });
-        return this._attachSnapshot(session, { status: "ok" });
+        return this._afterAction(session);
       }
       case "hover": {
         await locator.first().hover({ timeout });
@@ -3069,11 +3133,11 @@ class SessionManager {
           for (const [name, value] of Object.entries(fields)) {
             await this._fillComponentField(locator.getByLabel(name), name, value, timeout);
           }
-          return this._attachSnapshot(session, { status: "ok", filled: Object.keys(fields).length });
+          return this._afterAction(session, { filled: Object.keys(fields).length });
         }
         if (params.value != null) {
           await this._fillComponentField(locator, params.field || params.name || type, params.value, timeout);
-          return this._attachSnapshot(session, { status: "ok" });
+          return this._afterAction(session);
         }
         throw new Error("component fill: provide --fields (json) or --value");
       }

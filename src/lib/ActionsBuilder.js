@@ -325,7 +325,37 @@ function shape(item, within) {
   };
   out.selector = `[data-aux4-el="${item.id}"]`;
   if (within) { out.within = within; out.ref = null; }
+  out.how = howTo(out, within);
   return out;
+}
+
+// Spell out the exact aux4 command to act on this control, so an agent never
+// has to infer which command a role maps to. --ref when the control has one
+// (works on the current snapshot only), otherwise --selector (+ --within).
+function howTo(out, within) {
+  const target = out.ref != null ? `--ref ${out.ref}` : `--selector '${out.selector}'${within ? ` --within '${within}'` : ""}`;
+  switch (out.role) {
+    case "textbox":
+    case "searchbox":
+    case "segmented":
+      return `browser type ${target} --value "..."`;
+    case "combobox":
+    case "select":
+      return `browser select ${target} --value "<option>"`;
+    case "checkbox":
+    case "switch":
+    case "radio":
+      return out.checked ? `browser uncheck ${target}` : `browser check ${target}`;
+    case "button":
+    case "link":
+    case "option":
+    case "menuitem":
+    case "tab":
+    case "card":
+      return `browser click ${target}`;
+    default:
+      return `browser click ${target}`;
+  }
 }
 
 export class ActionsBuilder {
