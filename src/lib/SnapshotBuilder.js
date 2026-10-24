@@ -92,7 +92,8 @@ export class SnapshotBuilder {
           const ref = document.getElementById(labelledBy);
           if (ref) return (ref.textContent || "").trim().slice(0, 120);
         }
-        if (el.tagName.toLowerCase() === "input" || el.tagName.toLowerCase() === "textarea") {
+        const tag = el.tagName.toLowerCase();
+        if (tag === "input" || tag === "textarea" || tag === "select") {
           if (el.id) {
             const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
             if (label) return (label.textContent || "").trim().slice(0, 120);

@@ -1,5 +1,30 @@
 # Release notes
 
+## 1.0.32
+
+Integration build (CBR-052 line + BRW-008): combines the `actions`/`blocks`/`component`
+feature line with the `component fill` fix, plus an agent-friendliness pass —
+every command carries a one-line `--help` description, `actions` output states
+exact how-to-act commands per control, and action commands report the resulting
+URL/title and any visible validation/error text after acting.
+
+## 1.0.31
+
+Fix `component fill` silently doing nothing (BRW-008). `component`'s `action`
+variable had no `arg: true`, so the natural `aux4 browser component fill ...`
+syntax dropped the word `fill` entirely, left `action` at its `locate`
+default, and returned a convincing `{"status":"ok","count":1,"bounds":{...}}`
+without ever writing a value. `action` is now a positional argument, so both
+`component fill ...` and `component --action fill ...` work.
+
+`fill` now dispatches per matched element instead of calling `.fill()`
+unconditionally: text/email/date/textarea inputs still use `fill()`, `<select>`
+uses `selectOption()` (by option label, falling back to value), and
+checkboxes/radios use `check()`/`uncheck()` based on a truthy `--value`. A
+field that cannot be matched (via `--field` or a key in `--fields`) now always
+throws a named error (`component fill: field "X" not found`) instead of
+silently resolving as `ok` with `count: 0`.
+
 ## 1.0.30
 
 - New `actions` command: every control a person could use on the page (fields, buttons, links, options, clickable elements with no role such as suggestion items and cards), in open shadow roots and visible iframes, with label, value, context (dialog/landmark, heading path), the snapshot `ref` when it has one and an exact `selector` (+ `within`). `--includeNav`, `--within`, `--page`.

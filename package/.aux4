@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.30",
+  "version": "1.0.32",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -1349,7 +1349,8 @@
               {
                 "name": "action",
                 "text": "Action: locate, click, hover, read, count, bounds, fill, scroll",
-                "default": "locate"
+                "default": "locate",
+                "arg": true
               },
               {
                 "name": "name",
