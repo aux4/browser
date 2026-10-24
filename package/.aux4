@@ -1,7 +1,7 @@
 {
   "scope": "aux4",
   "name": "browser",
-  "version": "1.0.36",
+  "version": "1.0.37",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "license": "Apache-2.0",
   "git": "https://github.com/aux4/browser",
@@ -235,6 +235,37 @@
               {
                 "name": "within",
                 "text": "Optional iframe CSS selector to scope into (frameLocator); nest with >>>",
+                "default": ""
+              },
+              {
+                "name": "timeout",
+                "text": "Timeout in milliseconds",
+                "default": "5000"
+              },
+              {
+                "name": "wait",
+                "text": "Max time to wait for the page to settle (no in-flight network requests and no DOM mutations for a short quiet window) before returning, in ms",
+                "default": ""
+              }
+            ]
+          }
+        },
+        {
+          "name": "submit",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs submit values(session,within,timeout,wait)"
+          ],
+          "help": {
+            "text": "Submit a form by clicking its submit button",
+            "variables": [
+              {
+                "name": "session",
+                "text": "Session ID; defaults to the most recently used session when omitted",
+                "default": ""
+              },
+              {
+                "name": "within",
+                "text": "The form to submit: its accessible name (aria-label) or a CSS selector. Omit to use the only form on the page, or the form containing the most recently filled field",
                 "default": ""
               },
               {
@@ -1043,7 +1074,8 @@
               {
                 "name": "selector",
                 "text": "Wait target: CSS selector, text=..., url=..., networkidle, or settle",
-                "required": true
+                "required": true,
+                "arg": true
               },
               {
                 "name": "timeout",

@@ -144,6 +144,22 @@ aux4 browser close --session $SESSION >/dev/null 2>&1
 "title":"Fill Fixture"
 ```
 
+### should name the form's submit button after a successful fill
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/fill-fixture.html" 2>/dev/null)
+aux4 browser fill --session $SESSION --field Name --value Ann 2>/dev/null
+aux4 browser close --session $SESSION >/dev/null 2>&1
+```
+
+```expect:partial
+"submit":{"button":"Save"}
+```
+
 ### should fail with a clear error when the field cannot be matched
 
 ```timeout

@@ -1,5 +1,24 @@
 # Release notes
 
+## 1.0.37
+
+Agent-ergonomics follow-up (BRW-011), from a dojo contact-form trace: after a successful `fill` (`filled:4`)
+the agent called `browser submit` twice (the command didn't exist) and `wait --condition ...` (the wrong flag)
+instead of clicking the Send button — the form was never submitted.
+
+- **New `aux4 browser submit [--session] [--within <form-name-or-selector>] [--wait]` command.** Finds the
+  form on the page — the only form, the one named by `--within` (accessible name or CSS selector), or the one
+  containing the field most recently filled by `fill`/`component fill` — and clicks its submit control
+  (`button[type=submit]`/`input[type=submit]`, falling back to the form's only `<button>`, falling back to
+  `form.requestSubmit()` when there's no button at all). Reports `{status, button, url, title, errors}`, the
+  same after-action shape as `click`/`fill`/`type`. No form on the page errors naming the page's buttons/links
+  instead of a bare "not found", reusing the BRW-010 affordance helper.
+- **`fill` (and `component fill`) now name how to submit** on a successful call, e.g. `"submit":{"button":"Send"}`
+  — an additive field on top of the existing response shape, so the natural follow-up doesn't require a round
+  of `actions`/`snapshot` to find the button.
+- **`wait` now accepts its target positionally**, e.g. `aux4 browser wait "text=Thanks"`, in addition to
+  `--selector "text=Thanks"` — purely additive; `--selector` is unchanged.
+
 ## 1.0.36
 
 Agent-ergonomics follow-up (BRW-010), from a dojo booking-wizard trace (78 calls / 49 failed) and a contact-form

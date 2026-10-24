@@ -23,6 +23,10 @@ first command to reach for when acting on a single labelled input, text area, `<
   bounded by `--wait` (default 5000ms, or `AUX4_BROWSER_SETTLE_WAIT` on the daemon) — so an async validation
   message is captured instead of missed.
 - **`--within`** scopes the lookup inside an iframe (CSS selector; nest with `>>>`).
+- A successful fill also names how to submit the form the filled field belongs to, e.g.
+  `"submit":{"button":"Send"}` — a best-effort hint, added on top of the existing fields, never required
+  reading. When the submit button can't be resolved it falls back to `"submit":{"hint":"run: aux4 browser submit"}`.
+  Follow up with `aux4 browser submit` instead of re-deriving the button yourself.
 
 For a structural component that itself contains labelled fields (e.g. a named `<form>`), use
 `aux4 browser component fill --type form ...` instead — `fill` acts on the whole page (or the current
@@ -52,7 +56,7 @@ aux4 browser fill --session abc123 --field "Email" --value "user@test.com"
 ```
 
 ```json
-{"status":"ok","filled":1,"url":"https://example.com/signup","title":"Sign Up"}
+{"status":"ok","filled":1,"submit":{"button":"Sign Up"},"url":"https://example.com/signup","title":"Sign Up"}
 ```
 
 ```bash

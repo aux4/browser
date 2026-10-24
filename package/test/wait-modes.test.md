@@ -101,3 +101,25 @@ aux4 browser close --session $SESSION >/dev/null 2>&1
 status:ok
 mode:text
 ```
+
+### should accept the wait target positionally, without --selector
+
+```timeout
+30000
+```
+
+```execute
+SESSION=$(aux4 browser open --url https://aux4.io 2>/dev/null)
+RESULT=$(aux4 browser wait --session $SESSION "text=aux4" 2>/dev/null)
+echo "$RESULT" | node -e "
+  const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+  console.log('status:' + d.status);
+  console.log('mode:' + d.mode);
+"
+aux4 browser close --session $SESSION >/dev/null 2>&1
+```
+
+```expect
+status:ok
+mode:text
+```

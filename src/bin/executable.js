@@ -36,6 +36,7 @@ import { SetScopeCommand, ClearScopeCommand } from "../commands/ScopeCommand.js"
 import { SetSnapshotCommand } from "../commands/SetSnapshotCommand.js";
 import { ComponentCommand } from "../commands/ComponentCommand.js";
 import { FillCommand } from "../commands/FillCommand.js";
+import { SubmitCommand } from "../commands/SubmitCommand.js";
 import { SnapshotCommand } from "../commands/SnapshotCommand.js";
 import { ReadCommand } from "../commands/ReadCommand.js";
 import { BlocksCommand } from "../commands/BlocksCommand.js";
@@ -87,6 +88,7 @@ const commands = {
   "set-snapshot": { handler: SetSnapshotCommand, args: ["session", "mode"] },
   component:   { handler: ComponentCommand, args: ["session", "type", "action", "name", "row", "col", "where", "item", "field", "fields", "value", "tab", "path", "title", "timeout", "wait"] },
   fill:        { handler: FillCommand,     args: ["session", "field", "value", "fields", "within", "timeout", "wait"] },
+  submit:      { handler: SubmitCommand,   args: ["session", "within", "timeout", "wait"] },
   snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format", "output", "wait"] },
   blocks:      { handler: BlocksCommand,   args: ["session", "url", "waitUntil", "maxBlockChars", "includeNav", "wait"] },
   actions:     { handler: ActionsCommand,  args: ["session", "within", "includeNav", "page", "wait"] },

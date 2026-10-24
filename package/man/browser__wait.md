@@ -4,6 +4,9 @@ Wait for a condition before proceeding. Supports multiple modes beyond CSS selec
 
 On timeout, returns `{timedOut: true, waitedFor, timeout, currentUrl, title, visibleHeadings}` instead of an error, so agents can self-correct.
 
+`--selector` also takes a positional argument, so `aux4 browser wait "text=Welcome"` works without spelling out
+the flag. `--selector <target>` still works exactly as before; the positional form is purely additive.
+
 #### Modes
 
 - **CSS selector** — wait for an element to become visible: `--selector ".my-element"`
@@ -15,11 +18,12 @@ On timeout, returns `{timedOut: true, waitedFor, timeout, currentUrl, title, vis
 #### Usage
 
 ```bash
-aux4 browser wait --session <id> --selector <target> [--timeout 10000]
+aux4 browser wait --session <id> [--selector] <target> [--timeout 10000]
 ```
 
     --session   Session ID; defaults to the most recently used open session when omitted
-    --selector  Wait target: CSS selector, text=..., url=..., networkidle, or settle (required)
+    --selector  Wait target: CSS selector, text=..., url=..., networkidle, or settle (required; also
+                accepted positionally)
     --timeout   Timeout in milliseconds. Default: 10000
 
 #### Example
@@ -28,8 +32,8 @@ aux4 browser wait --session <id> --selector <target> [--timeout 10000]
 # Wait for a CSS selector
 aux4 browser wait --session abc123 --selector ".results-loaded"
 
-# Wait for text to appear
-aux4 browser wait --session abc123 --selector "text=Search results"
+# Wait for text to appear, using the positional form
+aux4 browser wait --session abc123 "text=Search results"
 
 # Wait for URL change
 aux4 browser wait --session abc123 --selector "url=/dashboard"

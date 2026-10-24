@@ -130,6 +130,7 @@ export class DaemonServer {
       case "list": return this.sessionManager.list();
       case "visit": return this.sessionManager.visit(params.session, params.url, params.waitUntil);
       case "fill": return this.sessionManager.fill(params.session, params);
+      case "submit": return this.sessionManager.submit(params.session, params);
       case "read": return this.sessionManager.read(params);
       case "back": return this.sessionManager.back(params.session);
       case "forward": return this.sessionManager.forward(params.session);

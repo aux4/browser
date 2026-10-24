@@ -162,7 +162,31 @@ a `<select>`, `check()`/`uncheck()` for a checkbox or radio based on a truthy `-
 no-ops — and the error also lists the fields and buttons actually on the page (or says there are none), plus the
 current url/title, so a wrong guess can self-correct instead of repeating. Every call reports
 `{status, url, title, errors}` so you know immediately whether the page changed or a validation message
-appeared — never a bare `{"status":"ok"}`.
+appeared — never a bare `{"status":"ok"}`. A successful call also names how to submit, e.g.
+`"submit":{"button":"Send"}` — see [Submitting a form](#submitting-a-form).
+
+### Submitting a form
+
+`submit` clicks the submit control of a form — the natural follow-up to `fill` once every field is filled:
+
+```bash
+aux4 browser fill --session <id> --fields '{"Name":"Ann","Email":"ann@example.com"}'
+aux4 browser submit --session <id>
+```
+
+With no `--within`, `submit` acts on the only `<form>` on the page, or — when there's more than one — the form
+containing the field `fill`/`component fill` most recently wrote to in this session. Name the form explicitly
+with `--within`, by its accessible name (aria-label) or any CSS selector, when several forms are on the page and
+none has been filled yet:
+
+```bash
+aux4 browser submit --session <id> --within "Newsletter"
+```
+
+It clicks `button[type="submit"]`/`input[type="submit"]` inside the form, falling back to the form's only
+`<button>` when there's no explicit submit type, and to the form's native `requestSubmit()` when there's no
+button at all. A page with no form at all errors naming the buttons/links actually on the page instead of a bare
+"not found". Reports `{status, button, url, title, errors}`, same after-action shape as `click`/`fill`/`type`.
 
 ### Interaction
 
@@ -476,6 +500,9 @@ Actions: `locate`, `click`, `hover`, `read`, `count`, `bounds`, `fill`, `scroll`
 ```bash
 # Wait for a selector to appear
 aux4 browser wait --session <id> --selector ".loaded" --timeout 5000
+
+# The wait target also works positionally, without --selector
+aux4 browser wait --session <id> "text=Welcome" --timeout 5000
 
 # Assert on elements
 aux4 browser expect --session <id> --selector "h1" --assertion have_text --expected "Welcome"

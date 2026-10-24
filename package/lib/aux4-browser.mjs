@@ -2301,10 +2301,14 @@ class SessionManager {
 
     if (params.fields) {
       const fields = typeof params.fields === "string" ? JSON.parse(params.fields) : params.fields;
+      let lastLabel = null;
       for (const [name, value] of Object.entries(fields)) {
         await this._fillComponentField(base.getByLabel(name), name, value, timeout, session);
+        lastLabel = name;
       }
-      return this._afterAction(session, { filled: Object.keys(fields).length }, params.wait);
+      session.lastFilledLabel = lastLabel;
+      const extra = { filled: Object.keys(fields).length, ...(await this._submitHint(base, lastLabel)) };
+      return this._afterAction(session, extra, params.wait);
     }
 
     if (!params.field) {
@@ -2314,7 +2318,116 @@ class SessionManager {
       throw new Error(`fill: --value is required for field "${params.field}"`);
     }
     await this._fillComponentField(base.getByLabel(params.field), params.field, params.value, timeout, session);
-    return this._afterAction(session, { filled: 1 }, params.wait);
+    session.lastFilledLabel = params.field;
+    const extra = { filled: 1, ...(await this._submitHint(base, params.field)) };
+    return this._afterAction(session, extra, params.wait);
+  }
+
+  // BRW-011: a successful fill names how to submit the form it just touched —
+  // an agent that just filled the last field naturally reaches for "submit"
+  // next, and this spares it a round of `actions`/`snapshot` to find the
+  // button. Best-effort only: never throws, never blocks the fill's own
+  // result on this lookup failing.
+  async _submitHint(base, label) {
+    if (!label) return {};
+    try {
+      const forms = base.locator("form");
+      const count = await forms.count();
+      if (count === 0) return {};
+      let form = forms.first();
+      if (count > 1) {
+        const candidate = forms.filter({ has: base.getByLabel(label) });
+        if ((await candidate.count()) > 0) form = candidate.first();
+      }
+      const control = await this._findSubmitControl(form);
+      if (control) {
+        const text = await this._controlLabel(control);
+        if (text) return { submit: { button: text } };
+      }
+      return { submit: { hint: "run: aux4 browser submit" } };
+    } catch {
+      return {};
+    }
+  }
+
+  // Shared by fill()'s hint and submit(): a form's submit control is its
+  // button[type=submit]/input[type=submit] if one exists, else its only
+  // <button> (a form with exactly one button almost always means "the
+  // submit button", even when it has no explicit type).
+  async _findSubmitControl(formLocator) {
+    const explicit = formLocator.locator('button[type="submit"], input[type="submit"]').first();
+    if ((await explicit.count()) > 0) return explicit;
+    const buttons = formLocator.locator("button");
+    if ((await buttons.count()) === 1) return buttons.first();
+    return null;
+  }
+
+  async _controlLabel(control) {
+    return await control
+      .evaluate((el) => String(el.textContent || el.value || el.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim())
+      .catch(() => "");
+  }
+
+  // BRW-011: resolve the form `submit` should act on — explicit --within
+  // (accessible name of the form, or any CSS selector) wins; otherwise the
+  // only form on the page; otherwise the form containing the most recently
+  // filled field (tracked by fill()/component fill()); otherwise (several
+  // forms, nothing filled yet) the first form, same best-effort fallback
+  // other by-role commands use. Returns null only when there is NO form at
+  // all, which is the one case submit() turns into an error.
+  async _resolveSubmitForm(session, base, params) {
+    if (params.within) {
+      const byName = base.getByRole("form", { name: params.within });
+      if ((await byName.count()) > 0) return byName.first();
+      const bySelector = base.locator(params.within);
+      if ((await bySelector.count()) > 0) return bySelector.first();
+      return null;
+    }
+    const forms = base.locator("form");
+    const count = await forms.count();
+    if (count === 0) return null;
+    if (count === 1) return forms.first();
+    if (session.lastFilledLabel) {
+      const candidate = forms.filter({ has: base.getByLabel(session.lastFilledLabel) });
+      if ((await candidate.count()) > 0) return candidate.first();
+    }
+    return forms.first();
+  }
+
+  // Top-level `submit`: the natural follow-up to `fill` that small models
+  // reach for even though it didn't exist before BRW-011 ("Command not
+  // found: submit"). Finds the form (see _resolveSubmitForm), clicks its
+  // submit control (see _findSubmitControl), and falls back to
+  // form.requestSubmit() when the form has no button at all. Shares the
+  // same after-action reporting every other write command uses.
+  async submit(sessionId, params) {
+    const session = await this.resolveSession(sessionId);
+    // Note: --within here identifies the FORM (accessible name or CSS
+    // selector), not an iframe — unlike every other command's --within.
+    // getBase() is called with no params so it never mistakes it for a
+    // frameLocator selector.
+    const base = this.getBase(session, {});
+    const timeout = parseInt(params.timeout) || 5000;
+
+    const form = await this._resolveSubmitForm(session, base, params);
+    if (!form) {
+      const info = await this._pageAffordances(session);
+      throw new Error(`submit: no form found on this page.${this._describeAvailable(info)}`);
+    }
+
+    const control = await this._findSubmitControl(form);
+    let button = null;
+    if (control) {
+      button = await this._controlLabel(control);
+      await control.click({ timeout });
+    } else {
+      await form.evaluate((el) => {
+        if (typeof el.requestSubmit === "function") el.requestSubmit();
+        else el.submit();
+      });
+    }
+
+    return this._afterAction(session, button ? { button } : {}, params.wait);
   }
 
   async screenshotOnError(session) {
@@ -3372,14 +3485,21 @@ class SessionManager {
         // cannot be matched always errors, never silently no-ops.
         if (params.fields) {
           const fields = typeof params.fields === "string" ? JSON.parse(params.fields) : params.fields;
+          let lastLabel = null;
           for (const [name, value] of Object.entries(fields)) {
             await this._fillComponentField(locator.getByLabel(name), name, value, timeout, session);
+            lastLabel = name;
           }
-          return this._afterAction(session, { filled: Object.keys(fields).length }, params.wait);
+          session.lastFilledLabel = lastLabel;
+          const extra = { filled: Object.keys(fields).length, ...(await this._submitHint(base, lastLabel)) };
+          return this._afterAction(session, extra, params.wait);
         }
         if (params.value != null) {
-          await this._fillComponentField(locator, params.field || params.name || type, params.value, timeout, session);
-          return this._afterAction(session, {}, params.wait);
+          const label = params.field || params.name || type;
+          await this._fillComponentField(locator, label, params.value, timeout, session);
+          session.lastFilledLabel = label;
+          const extra = await this._submitHint(base, label);
+          return this._afterAction(session, extra, params.wait);
         }
         throw new Error("component fill: provide --fields (json) or --value");
       }
@@ -3726,6 +3846,7 @@ class DaemonServer {
       case "list": return this.sessionManager.list();
       case "visit": return this.sessionManager.visit(params.session, params.url, params.waitUntil);
       case "fill": return this.sessionManager.fill(params.session, params);
+      case "submit": return this.sessionManager.submit(params.session, params);
       case "read": return this.sessionManager.read(params);
       case "back": return this.sessionManager.back(params.session);
       case "forward": return this.sessionManager.forward(params.session);
@@ -4477,6 +4598,17 @@ async function FillCommand(params) {
   console.log(JSON.stringify(result));
 }
 
+async function SubmitCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("submit", {
+    session: params.session,
+    within: params.within,
+    timeout: params.timeout,
+    wait: params.wait
+  });
+  console.log(JSON.stringify(result));
+}
+
 async function SnapshotCommand(params) {
   const client = new DaemonClient();
   const result = await client.send("snapshot", {
@@ -4580,6 +4712,7 @@ const commands = {
   "set-snapshot": { handler: SetSnapshotCommand, args: ["session", "mode"] },
   component:   { handler: ComponentCommand, args: ["session", "type", "action", "name", "row", "col", "where", "item", "field", "fields", "value", "tab", "path", "title", "timeout", "wait"] },
   fill:        { handler: FillCommand,     args: ["session", "field", "value", "fields", "within", "timeout", "wait"] },
+  submit:      { handler: SubmitCommand,   args: ["session", "within", "timeout", "wait"] },
   snapshot:    { handler: SnapshotCommand, args: ["session", "mode", "format", "output", "wait"] },
   blocks:      { handler: BlocksCommand,   args: ["session", "url", "waitUntil", "maxBlockChars", "includeNav", "wait"] },
   actions:     { handler: ActionsCommand,  args: ["session", "within", "includeNav", "page", "wait"] },
