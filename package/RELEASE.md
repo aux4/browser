@@ -1,6 +1,6 @@
 # Release notes
 
-## 1.0.33
+## 1.0.34
 
 Agent-ergonomics follow-up (BRW-009), from real agent transcripts driving the browser through `executeAux4`:
 
@@ -19,8 +19,8 @@ Agent-ergonomics follow-up (BRW-009), from real agent transcripts driving the br
   `type`, `select`, `check`, `uncheck`, `click`, `read`, `content`, `snapshot`, then the rest.
 - The `mock-open`/`mock-attach`/`mock-close`/`broken-open` test fixtures used to exercise the provider seam
   (CBR-008) without a real cloud provider are no longer part of the published command surface — they moved from
-  `package/.aux4` into a test-only `package/test/.aux4` loaded only when tests run from that directory, so an
-  installed `aux4/browser` never lists them.
+  `package/.aux4` into a `file:.aux4` block materialized only while `provider-seam.test.md` runs, so an installed
+  `aux4/browser` never lists them and the package tree never has a second `.aux4` for `pkger build` to trip on.
 
 ## 1.0.32
 
