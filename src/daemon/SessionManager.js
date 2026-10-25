@@ -32,8 +32,8 @@ function encodeSessionId(provider, token) {
 // build the example from what the caller actually passed; the field name in
 // the example is always a placeholder.
 function fillUsage(value) {
-  const example = value != null && value !== "" ? `"Label=${value}"` : `"Destination=Tokyo"`;
-  return `use --field ${example} (repeat --field for more fields, e.g. --field "Class=Business"), or --fields '{"Label":"value",...}'`;
+  const example = value != null && value !== "" ? `"<label>=${value}"` : `"<label>=<value>"`;
+  return `use --field ${example}, once per field, where <label> is the field's visible label on the page; or --fields '{"<label>":"<value>",...}'`;
 }
 
 // Built-in provider "cdp": attach to ANY remote Chromium over a CDP WebSocket

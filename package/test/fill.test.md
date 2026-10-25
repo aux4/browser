@@ -197,7 +197,7 @@ echo "exit:$EXIT"
 ```
 
 ```error:partial
-use --field \"Destination=Tokyo\" (repeat --field for more fields, e.g. --field \"Class=Business\")
+use --field \"<label>=<value>\", once per field
 ```
 
 ```expect:partial
@@ -219,7 +219,7 @@ echo "exit:$EXIT"
 ```
 
 ```error:partial
-use --field \"Label=Tokyo\" (repeat --field for more fields, e.g. --field \"Class=Business\")
+use --field \"<label>=Tokyo\", once per field
 ```
 
 ```expect:partial
