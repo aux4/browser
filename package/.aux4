@@ -38,7 +38,8 @@
           ],
           "help": {
             "text": "Headless browser automation"
-          }
+          },
+          "private": true
         }
       ]
     },
