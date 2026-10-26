@@ -147,6 +147,19 @@ export class DaemonServer {
       case "stop":
         setTimeout(() => this.stop(), 100);
         return { status: "stopping" };
+      case "set-persistent":
+        // BRW-013: `aux4 browser start --persistent true` against an
+        // ALREADY-RUNNING daemon used to be a pure no-op ({"status":
+        // "already_running"}) -- it never touched that daemon's own
+        // `persistent` flag, so a daemon that first came up non-persistent
+        // (e.g. via DaemonClient's implicit autostart) stayed non-persistent
+        // forever, even after a caller explicitly asked for persistence. Any
+        // unrelated session elsewhere in the same shared daemon dropping its
+        // count to zero would then still self-exit the whole daemon
+        // (onEmpty), silently invalidating every other open session. This
+        // lets an already-running daemon be upgraded in place.
+        this.persistent = true;
+        return { status: "ok", persistent: true };
       default:
         throw new Error(`Unknown method: ${method}`);
     }
