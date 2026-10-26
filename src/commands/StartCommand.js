@@ -5,6 +5,7 @@ import os from "node:os";
 import fs from "node:fs";
 import { DaemonServer } from "../daemon/server.js";
 import { ensureBrowserInstalled } from "../daemon/BrowserInstaller.js";
+import { DaemonClient } from "../client/DaemonClient.js";
 
 import { SOCKET_PATH, PID_PATH } from "../lib/Paths.js";
 
@@ -52,8 +53,21 @@ export async function StartCommand(params) {
     return;
   }
 
-  // Already running? Just report status
+  // Already running? Just report status -- but if the caller wants a
+  // persistent daemon and this one isn't yet (BRW-013: it may have come up
+  // via an earlier implicit, non-persistent autostart), upgrade it in place
+  // rather than silently leaving it exitable the moment ANY session in it
+  // (not necessarily the caller's own) drops the daemon's count to zero.
   if (isDaemonRunning()) {
+    const wantsPersistent = params.persistent === "true" || params.persistent === true;
+    if (wantsPersistent) {
+      try {
+        await new DaemonClient().send("set-persistent", {});
+      } catch {
+        // Best-effort -- if the upgrade call fails, status still correctly
+        // reports an existing daemon; never worse than before this fix.
+      }
+    }
     console.log(JSON.stringify({ status: "already_running" }));
     return;
   }

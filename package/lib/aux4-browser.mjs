@@ -3914,6 +3914,19 @@ class DaemonServer {
       case "stop":
         setTimeout(() => this.stop(), 100);
         return { status: "stopping" };
+      case "set-persistent":
+        // BRW-013: `aux4 browser start --persistent true` against an
+        // ALREADY-RUNNING daemon used to be a pure no-op ({"status":
+        // "already_running"}) -- it never touched that daemon's own
+        // `persistent` flag, so a daemon that first came up non-persistent
+        // (e.g. via DaemonClient's implicit autostart) stayed non-persistent
+        // forever, even after a caller explicitly asked for persistence. Any
+        // unrelated session elsewhere in the same shared daemon dropping its
+        // count to zero would then still self-exit the whole daemon
+        // (onEmpty), silently invalidating every other open session. This
+        // lets an already-running daemon be upgraded in place.
+        this.persistent = true;
+        return { status: "ok", persistent: true };
       default:
         throw new Error(`Unknown method: ${method}`);
     }
@@ -3936,79 +3949,6 @@ class DaemonServer {
     try { fs.unlinkSync(PID_PATH); } catch {}
     if (!this.embedded) process.exit(0);
   }
-}
-
-function isDaemonRunning() {
-  try {
-    const pid = parseInt(fs.readFileSync(PID_PATH, "utf-8").trim());
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function waitForSocket(maxAttempts = 30) {
-  return new Promise((resolve, reject) => {
-    let attempts = 0;
-    const tryConnect = () => {
-      attempts++;
-      const socket = net.createConnection(SOCKET_PATH);
-      socket.on("connect", () => { socket.end(); resolve(); });
-      socket.on("error", () => {
-        if (attempts >= maxAttempts) {
-          reject(new Error("Daemon failed to start"));
-        } else {
-          setTimeout(tryConnect, 500);
-        }
-      });
-    };
-    tryConnect();
-  });
-}
-
-async function StartCommand(params) {
-  // If running as the forked daemon child, start server directly
-  if (process.env.AUX4_BROWSER_DAEMON === "1") {
-    const server = new DaemonServer({
-      maxSessions: parseInt(params.maxSessions) || 20,
-      persistent: params.persistent === "true" || params.persistent === true,
-      channel: params.channel || "",
-      browser: params.browser || "",
-      headed: params.headed === "true" || params.headed === true,
-      localBrowser: !(params.localBrowser === "false" || params.localBrowser === false)
-    });
-    await server.start();
-    return;
-  }
-
-  // Already running? Just report status
-  if (isDaemonRunning()) {
-    console.log(JSON.stringify({ status: "already_running" }));
-    return;
-  }
-
-  // Self-provision the browser binary in the foreground (before forking the
-  // detached daemon) so the "installing…" notice is visible to the user and the
-  // daemon child never blocks on a download while waitForSocket() is ticking.
-  // Skipped with --localBrowser false (remote-only daemon: the local browser
-  // is then provisioned lazily, on the first local session, if ever).
-  if (!(params.localBrowser === "false" || params.localBrowser === false)) {
-    ensureBrowserInstalled(params.browser || "chromium");
-  }
-
-  // Fork the daemon to the background
-  const child = spawn(process.execPath, process.argv.slice(1), {
-    detached: true,
-    stdio: "ignore",
-    env: { ...process.env, AUX4_BROWSER_DAEMON: "1" }
-  });
-  child.unref();
-
-  // Wait for the daemon socket to become available
-  await waitForSocket();
-
-  console.log(JSON.stringify({ status: "started", pid: child.pid }));
 }
 
 class DaemonClient {
@@ -4091,6 +4031,92 @@ class DaemonClient {
       socket.on("error", reject);
     });
   }
+}
+
+function isDaemonRunning() {
+  try {
+    const pid = parseInt(fs.readFileSync(PID_PATH, "utf-8").trim());
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function waitForSocket(maxAttempts = 30) {
+  return new Promise((resolve, reject) => {
+    let attempts = 0;
+    const tryConnect = () => {
+      attempts++;
+      const socket = net.createConnection(SOCKET_PATH);
+      socket.on("connect", () => { socket.end(); resolve(); });
+      socket.on("error", () => {
+        if (attempts >= maxAttempts) {
+          reject(new Error("Daemon failed to start"));
+        } else {
+          setTimeout(tryConnect, 500);
+        }
+      });
+    };
+    tryConnect();
+  });
+}
+
+async function StartCommand(params) {
+  // If running as the forked daemon child, start server directly
+  if (process.env.AUX4_BROWSER_DAEMON === "1") {
+    const server = new DaemonServer({
+      maxSessions: parseInt(params.maxSessions) || 20,
+      persistent: params.persistent === "true" || params.persistent === true,
+      channel: params.channel || "",
+      browser: params.browser || "",
+      headed: params.headed === "true" || params.headed === true,
+      localBrowser: !(params.localBrowser === "false" || params.localBrowser === false)
+    });
+    await server.start();
+    return;
+  }
+
+  // Already running? Just report status -- but if the caller wants a
+  // persistent daemon and this one isn't yet (BRW-013: it may have come up
+  // via an earlier implicit, non-persistent autostart), upgrade it in place
+  // rather than silently leaving it exitable the moment ANY session in it
+  // (not necessarily the caller's own) drops the daemon's count to zero.
+  if (isDaemonRunning()) {
+    const wantsPersistent = params.persistent === "true" || params.persistent === true;
+    if (wantsPersistent) {
+      try {
+        await new DaemonClient().send("set-persistent", {});
+      } catch {
+        // Best-effort -- if the upgrade call fails, status still correctly
+        // reports an existing daemon; never worse than before this fix.
+      }
+    }
+    console.log(JSON.stringify({ status: "already_running" }));
+    return;
+  }
+
+  // Self-provision the browser binary in the foreground (before forking the
+  // detached daemon) so the "installing…" notice is visible to the user and the
+  // daemon child never blocks on a download while waitForSocket() is ticking.
+  // Skipped with --localBrowser false (remote-only daemon: the local browser
+  // is then provisioned lazily, on the first local session, if ever).
+  if (!(params.localBrowser === "false" || params.localBrowser === false)) {
+    ensureBrowserInstalled(params.browser || "chromium");
+  }
+
+  // Fork the daemon to the background
+  const child = spawn(process.execPath, process.argv.slice(1), {
+    detached: true,
+    stdio: "ignore",
+    env: { ...process.env, AUX4_BROWSER_DAEMON: "1" }
+  });
+  child.unref();
+
+  // Wait for the daemon socket to become available
+  await waitForSocket();
+
+  console.log(JSON.stringify({ status: "started", pid: child.pid }));
 }
 
 async function StopCommand() {
