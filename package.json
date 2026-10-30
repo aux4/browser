@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Headless browser automation with daemon architecture and multi-agent session management",
   "scripts": {
-    "build": "rollup -c && cp package/lib/package.json package/lib/package.json.bak 2>/dev/null; npm install --prefix package/lib; rm -f package/lib/package.json.bak",
+    "build": "rollup -c && cp package/lib/package.json package/lib/package.json.bak 2>/dev/null; npm install --omit=optional --prefix package/lib; rm -f package/lib/package.json.bak",
     "test": "aux4 test run"
   },
   "keywords": ["aux4", "browser", "playwright", "headless", "automation"],
