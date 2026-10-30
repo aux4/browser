@@ -5,7 +5,8 @@ export async function ClickTextCommand(params) {
   const result = await client.send("click-text", {
     session: params.session,
     text: params.text,
-    index: params.index
+    index: params.index,
+    within: params.within
   });
   console.log(JSON.stringify(result));
 }

@@ -161,6 +161,20 @@ actions:
     execute: "aux4 browser get-items --session {{session}} --selector ${selector}"
   - expression: "evaluate {script}"
     execute: "aux4 browser eval --session {{session}} --script ${script}"
+  - expression: "move mouse to {x} {y}"
+    execute: "aux4 browser mouse --session {{session}} --action move --x ${x} --y ${y}"
+    params:
+      x: \d+
+      y: \d+
+  - expression: "click mouse at {x} {y}"
+    execute: "aux4 browser mouse --session {{session}} --action click --x ${x} --y ${y}"
+    params:
+      x: \d+
+      y: \d+
+  - expression: "click mouse on {selector} in {within}"
+    execute: "aux4 browser mouse --session {{session}} --action click --selector "${selector}" --within "${within}""
+  - expression: "click mouse on {selector}"
+    execute: "aux4 browser mouse --session {{session}} --action click --selector "${selector}""
   - expression: "sleep {seconds} seconds"
     execute: "sleep ${seconds}"
     params:

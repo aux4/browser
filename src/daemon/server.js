@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import { SessionManager } from "./SessionManager.js";
 import { BrowserEngine } from "./BrowserEngine.js";
+import { ensureBrowserInstalled } from "./BrowserInstaller.js";
 
 const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
 const SOCKET_PATH = path.join(SOCKET_DIR, "browser.sock");
@@ -15,6 +16,7 @@ export class DaemonServer {
     this.persistent = options.persistent || false;
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
+    this.headed = options.headed || false;
     this.sessionManager = null;
     this.server = null;
     this.browser = null;
@@ -24,9 +26,15 @@ export class DaemonServer {
     fs.mkdirSync(SOCKET_DIR, { recursive: true });
     if (fs.existsSync(SOCKET_PATH)) fs.unlinkSync(SOCKET_PATH);
 
+    // Defensive self-heal for when the daemon is launched directly (not via the
+    // StartCommand parent, which already provisions the browser). No-op/quiet
+    // when the browser is already present.
+    ensureBrowserInstalled(this.browserName || "chromium");
+
     const launchOptions = {};
     if (this.channel) launchOptions.channel = this.channel;
     if (this.browserName) launchOptions.browser = this.browserName;
+    if (this.headed) launchOptions.headed = true;
     this.browser = await BrowserEngine.launch(launchOptions);
     this.sessionManager = new SessionManager(this.browser, {
       maxSessions: this.maxSessions,
@@ -106,6 +114,7 @@ export class DaemonServer {
       case "reload": return this.sessionManager.reload(params.session);
       case "click": return this.sessionManager.click(params.session, params);
       case "click-selector": return this.sessionManager.clickSelector(params.session, params);
+      case "mouse": return this.sessionManager.mouse(params.session, params);
       case "click-text": return this.sessionManager.clickText(params.session, params);
       case "click-item": return this.sessionManager.clickItem(params.session, params);
       case "type": return this.sessionManager.type(params.session, params);

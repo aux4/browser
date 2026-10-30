@@ -1,10 +1,11 @@
-import { spawn } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import net from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { chromium, webkit, firefox } from 'playwright';
+import { createRequire } from 'node:module';
 
 class ContentExtractor {
   static async extract(page, options = {}) {
@@ -455,9 +456,20 @@ class SessionManager {
     return session;
   }
 
-  getBase(session) {
+  getBase(session, params = {}) {
     const page = session.pages[session.activeTab];
-    return session.scope ? page.locator(session.scope) : page;
+    // --within scopes subsequent locators INSIDE an iframe via frameLocator,
+    // which (unlike page.locator on the iframe element) can reach the frame's
+    // document and dispatches real, auto-waited events. Supports nested frames
+    // by splitting the selector on ">>>".
+    let base = page;
+    const within = params.within;
+    if (within) {
+      for (const sel of String(within).split(">>>").map(s => s.trim()).filter(Boolean)) {
+        base = base.frameLocator(sel);
+      }
+    }
+    return session.scope ? base.locator(session.scope) : base;
   }
 
   setScope(sessionId, selector) {
@@ -811,7 +823,7 @@ class SessionManager {
       return this._attachSnapshot(session, { status: "ok" });
     }
 
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "button";
     const locator = base.getByRole(role, { name: params.name });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
@@ -820,14 +832,51 @@ class SessionManager {
 
   async clickSelector(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     return this._clickWithTimeout(session, base.locator(params.selector).first(), timeout, `selector="${params.selector}"`);
   }
 
+  // Drive the real mouse via CDP at viewport coordinates, with a human-like
+  // multi-step trajectory. Unlike locator.click() (which teleports to the
+  // element), this moves the cursor through intermediate points so behavioral
+  // bot-detection sees natural movement. Works across iframes because it
+  // targets page-space coordinates, not a frame-scoped element.
+  async mouse(sessionId, params) {
+    const session = this.getSession(sessionId);
+    const page = session.pages[session.activeTab];
+    const action = params.action || "click";
+    let x = parseFloat(params.x);
+    let y = parseFloat(params.y);
+    // When a selector is given, resolve the element's page-space box (honoring
+    // --within for iframes) and aim at its center, so callers can mouse-click an
+    // element by selector without computing coordinates themselves.
+    if (params.selector) {
+      const base = this.getBase(session, params);
+      const box = await base.locator(params.selector).first().boundingBox({ timeout: parseInt(params.timeout) || 5000 });
+      if (!box) return { status: "error", reason: "selector not found", selector: params.selector };
+      x = box.x + box.width / 2;
+      y = box.y + box.height / 2;
+    }
+    const steps = parseInt(params.steps) || 20;
+    if (action === "move") {
+      await page.mouse.move(x, y, { steps });
+    } else if (action === "down") {
+      await page.mouse.down();
+    } else if (action === "up") {
+      await page.mouse.up();
+    } else {
+      // click: glide to the point over several steps, then press
+      await page.mouse.move(x, y, { steps });
+      await page.mouse.down();
+      await page.mouse.up();
+    }
+    return { status: "ok", action, x: Math.round(x), y: Math.round(y) };
+  }
+
   async clickText(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const locator = base.getByText(params.text, { exact: false });
     const index = params.index != null ? parseInt(params.index) - 1 : 0;
     const timeout = parseInt(params.timeout) || 5000;
@@ -836,7 +885,7 @@ class SessionManager {
 
   async type(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).fill(params.value);
     return this._attachSnapshot(session, { status: "ok" });
@@ -846,7 +895,7 @@ class SessionManager {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     if (params.to) {
-      const base = this.getBase(session);
+      const base = this.getBase(session, params);
       await base.getByText(params.to, { exact: false }).first().scrollIntoViewIfNeeded({ timeout: parseInt(params.timeout) || 5000 });
     } else if (params.direction === "top") {
       await page.evaluate(() => window.scrollTo(0, 0));
@@ -960,7 +1009,7 @@ class SessionManager {
       // text= mode: wait for text to appear
       if (selector.startsWith("text=")) {
         const text = selector.slice(5);
-        const base = this.getBase(session);
+        const base = this.getBase(session, params);
         await base.getByText(text, { exact: false }).first().waitFor({ state: "visible", timeout });
         return { status: "ok", mode: "text" };
       }
@@ -972,7 +1021,7 @@ class SessionManager {
       }
 
       // Default: CSS selector
-      const base = this.getBase(session);
+      const base = this.getBase(session, params);
       await base.locator(selector).first().waitFor({ state: "visible", timeout });
       return { status: "ok" };
     } catch (e) {
@@ -994,7 +1043,7 @@ class SessionManager {
   async expect(sessionId, params) {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const locator = base.locator(params.selector);
 
@@ -1082,7 +1131,7 @@ class SessionManager {
 
   async select(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "combobox";
     await base.getByRole(role, { name: params.name }).selectOption(params.value, { timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
@@ -1090,7 +1139,7 @@ class SessionManager {
 
   async check(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).check({ timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
@@ -1098,7 +1147,7 @@ class SessionManager {
 
   async uncheck(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "checkbox";
     await base.getByRole(role, { name: params.name }).uncheck({ timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
@@ -1106,7 +1155,7 @@ class SessionManager {
 
   async hover(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "button";
     await base.getByRole(role, { name: params.name }).hover({ timeout: parseInt(params.timeout) || 5000 });
     return this._attachSnapshot(session, { status: "ok" });
@@ -1116,7 +1165,7 @@ class SessionManager {
     const session = this.getSession(sessionId);
     const page = session.pages[session.activeTab];
     if (params.selector) {
-      const base = this.getBase(session);
+      const base = this.getBase(session, params);
       await base.locator(params.selector).first().focus({ timeout: parseInt(params.timeout) || 5000 });
     }
     await page.keyboard.press(params.key);
@@ -1125,7 +1174,7 @@ class SessionManager {
 
   async clear(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const role = params.role || "textbox";
     await base.getByRole(role, { name: params.name }).clear({ timeout: parseInt(params.timeout) || 5000 });
     return { status: "ok" };
@@ -1133,7 +1182,7 @@ class SessionManager {
 
   async upload(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     await base.getByLabel(params.name).setInputFiles(params.file, { timeout: parseInt(params.timeout) || 5000 });
     return { status: "ok" };
   }
@@ -1226,7 +1275,7 @@ class SessionManager {
 
   async clickItem(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const items = this._listItems(base, params.selector);
     const item = params.item;
@@ -1242,7 +1291,7 @@ class SessionManager {
 
   async expectList(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 10000;
     const items = this._listItems(base, params.selector);
 
@@ -1264,7 +1313,7 @@ class SessionManager {
 
   async getItems(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const items = this._listItems(base, params.selector);
     const count = await items.count();
     const result = [];
@@ -1277,7 +1326,7 @@ class SessionManager {
 
   async component(sessionId, params) {
     const session = this.getSession(sessionId);
-    const base = this.getBase(session);
+    const base = this.getBase(session, params);
     const timeout = parseInt(params.timeout) || 5000;
     const type = params.type;
     if (!type) throw new Error("component: --type is required");
@@ -1410,6 +1459,7 @@ class SessionManager {
       case "reload": return this.reload(sessionId);
       case "click": return this.click(sessionId, params);
       case "click-selector": return this.clickSelector(sessionId, params);
+      case "mouse": return this.mouse(sessionId, params);
       case "click-text": return this.clickText(sessionId, params);
       case "click-item": return this.clickItem(sessionId, params);
       case "type": return this.type(sessionId, params);
@@ -1449,11 +1499,100 @@ const BROWSERS = { chromium, firefox, webkit };
 
 class BrowserEngine {
   static async launch(options = {}) {
-    const { channel, browser: browserName, ...launchOptions } = options;
+    const { channel, browser: browserName, headed, ...launchOptions } = options;
     const engine = BROWSERS[browserName] || chromium;
     if (channel) launchOptions.channel = channel;
-    return engine.launch({ headless: true, ...launchOptions });
+    // headed (visible) Chrome dramatically lowers bot-detection vs headless
+    return engine.launch({ headless: !headed, ...launchOptions });
   }
+}
+
+const ENGINES = { chromium, firefox, webkit };
+
+function normalizeBrowserName(browserName) {
+  return ENGINES[browserName] ? browserName : "chromium";
+}
+
+/**
+ * Returns true when Playwright's browser executable for the given engine is
+ * present on disk. Never throws — a missing/uninstalled browser reports false.
+ */
+function isBrowserInstalled(browserName = "chromium") {
+  const engine = ENGINES[normalizeBrowserName(browserName)];
+  try {
+    const execPath = engine.executablePath();
+    return Boolean(execPath) && fs.existsSync(execPath);
+  } catch {
+    // Newer Playwright throws from executablePath() when the browser is absent.
+    return false;
+  }
+}
+
+/**
+ * Locates the bundled Playwright installer CLI. playwright-core/cli.js is the
+ * real installer; playwright/cli.js is a thin re-export. The package "exports"
+ * map blocks direct subpath resolution, so we resolve package.json (always
+ * exported) and join cli.js next to it.
+ */
+function resolveInstallerCli() {
+  const require = createRequire(import.meta.url);
+  for (const pkg of ["playwright-core", "playwright"]) {
+    try {
+      const pkgJson = require.resolve(`${pkg}/package.json`);
+      const cli = path.join(path.dirname(pkgJson), "cli.js");
+      if (fs.existsSync(cli)) return cli;
+    } catch {
+      // try the next candidate
+    }
+  }
+  return null;
+}
+
+/**
+ * Ensures Playwright's browser binary is present, downloading it on first use
+ * (the equivalent of `npx playwright install <browser>`). Idempotent and quiet
+ * when already installed; prints a one-time notice to stderr while downloading.
+ *
+ * Only the browser BINARY is provisioned here — OS-level shared libraries are
+ * declared in the package `.aux4` "system" field (Linux) and, for containers,
+ * are best baked in with `playwright install-deps chromium` at image build.
+ */
+function ensureBrowserInstalled(browserName = "chromium", log = defaultLog) {
+  const name = normalizeBrowserName(browserName);
+
+  if (isBrowserInstalled(name)) return { installed: false, browser: name };
+
+  const cli = resolveInstallerCli();
+  if (!cli) {
+    throw new Error(
+      `Playwright ${name} is not installed and the Playwright installer could not be located. ` +
+        `Install it manually with: npx playwright install ${name}`
+    );
+  }
+
+  log(`browser: ${name} runtime not found — installing it now (one-time, this may take a minute)...`);
+  // Route the installer's download progress (fd 1) to our stderr (fd 2) so a
+  // caller parsing this process's stdout (e.g. the {"status":"started"} line)
+  // never sees the progress bars.
+  const result = spawnSync(process.execPath, [cli, "install", name], {
+    stdio: ["ignore", 2, 2],
+    env: process.env
+  });
+
+  if (result.error || result.status !== 0) {
+    const detail = result.error ? result.error.message : `exit code ${result.status}`;
+    throw new Error(
+      `Failed to install Playwright ${name} (${detail}). ` +
+        `Install it manually with: npx playwright install ${name}`
+    );
+  }
+
+  log(`browser: ${name} installed.`);
+  return { installed: true, browser: name };
+}
+
+function defaultLog(message) {
+  process.stderr.write(message + "\n");
 }
 
 const SOCKET_DIR$1 = path.join(os.homedir(), ".aux4.config", "browser");
@@ -1466,6 +1605,7 @@ class DaemonServer {
     this.persistent = options.persistent || false;
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
+    this.headed = options.headed || false;
     this.sessionManager = null;
     this.server = null;
     this.browser = null;
@@ -1475,9 +1615,15 @@ class DaemonServer {
     fs.mkdirSync(SOCKET_DIR$1, { recursive: true });
     if (fs.existsSync(SOCKET_PATH$2)) fs.unlinkSync(SOCKET_PATH$2);
 
+    // Defensive self-heal for when the daemon is launched directly (not via the
+    // StartCommand parent, which already provisions the browser). No-op/quiet
+    // when the browser is already present.
+    ensureBrowserInstalled(this.browserName || "chromium");
+
     const launchOptions = {};
     if (this.channel) launchOptions.channel = this.channel;
     if (this.browserName) launchOptions.browser = this.browserName;
+    if (this.headed) launchOptions.headed = true;
     this.browser = await BrowserEngine.launch(launchOptions);
     this.sessionManager = new SessionManager(this.browser, {
       maxSessions: this.maxSessions,
@@ -1557,6 +1703,7 @@ class DaemonServer {
       case "reload": return this.sessionManager.reload(params.session);
       case "click": return this.sessionManager.click(params.session, params);
       case "click-selector": return this.sessionManager.clickSelector(params.session, params);
+      case "mouse": return this.sessionManager.mouse(params.session, params);
       case "click-text": return this.sessionManager.clickText(params.session, params);
       case "click-item": return this.sessionManager.clickItem(params.session, params);
       case "type": return this.sessionManager.type(params.session, params);
@@ -1646,7 +1793,8 @@ async function StartCommand(params) {
       maxSessions: parseInt(params.maxSessions) || 20,
       persistent: params.persistent === "true" || params.persistent === true,
       channel: params.channel || "",
-      browser: params.browser || ""
+      browser: params.browser || "",
+      headed: params.headed === "true" || params.headed === true
     });
     await server.start();
     return;
@@ -1657,6 +1805,11 @@ async function StartCommand(params) {
     console.log(JSON.stringify({ status: "already_running" }));
     return;
   }
+
+  // Self-provision the browser binary in the foreground (before forking the
+  // detached daemon) so the "installing…" notice is visible to the user and the
+  // daemon child never blocks on a download while waitForSocket() is ticking.
+  ensureBrowserInstalled(params.browser || "chromium");
 
   // Fork the daemon to the background
   const child = spawn(process.execPath, process.argv.slice(1), {
@@ -1821,7 +1974,8 @@ async function ClickCommand(params) {
     name: params.name,
     role: params.role,
     index: params.index,
-    ref: params.ref
+    ref: params.ref,
+    within: params.within
   });
   console.log(JSON.stringify(result));
 }
@@ -1830,7 +1984,22 @@ async function ClickSelectorCommand(params) {
   const client = new DaemonClient();
   const result = await client.send("click-selector", {
     session: params.session,
-    selector: params.selector
+    selector: params.selector,
+    within: params.within
+  });
+  console.log(JSON.stringify(result));
+}
+
+async function MouseCommand(params) {
+  const client = new DaemonClient();
+  const result = await client.send("mouse", {
+    session: params.session,
+    action: params.action,
+    x: params.x,
+    y: params.y,
+    steps: params.steps,
+    selector: params.selector,
+    within: params.within
   });
   console.log(JSON.stringify(result));
 }
@@ -1840,7 +2009,8 @@ async function ClickTextCommand(params) {
   const result = await client.send("click-text", {
     session: params.session,
     text: params.text,
-    index: params.index
+    index: params.index,
+    within: params.within
   });
   console.log(JSON.stringify(result));
 }
@@ -1894,7 +2064,8 @@ async function TypeCommand(params) {
       session: params.session,
       name: names[i],
       value: values[i],
-      role: params.role
+      role: params.role,
+      within: params.within
     });
   }
   console.log(JSON.stringify(result));
@@ -2191,7 +2362,7 @@ const action = args[0];
 const values = args.slice(1);
 
 const commands = {
-  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser"] },
+  start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed"] },
   stop:        { handler: StopCommand,     args: [] },
   open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil", "auditable"] },
   inspect:     { handler: InspectCommand,  args: ["session"] },
@@ -2201,11 +2372,12 @@ const commands = {
   back:        { handler: BackCommand,     args: ["session"] },
   forward:     { handler: ForwardCommand,  args: ["session"] },
   reload:      { handler: ReloadCommand,   args: ["session"] },
-  click:       { handler: ClickCommand,    args: ["session", "name", "role", "index", "ref"] },
-  "click-selector": { handler: ClickSelectorCommand, args: ["session", "selector"] },
-  "click-text": { handler: ClickTextCommand, args: ["session", "text", "index"] },
+  click:       { handler: ClickCommand,    args: ["session", "name", "role", "index", "ref", "within"] },
+  "click-selector": { handler: ClickSelectorCommand, args: ["session", "selector", "within"] },
+  mouse:       { handler: MouseCommand,    args: ["session", "action", "x", "y", "steps", "selector", "within"] },
+  "click-text": { handler: ClickTextCommand, args: ["session", "text", "index", "within"] },
   "click-item": { handler: ClickItemCommand, args: ["session", "item", "selector"] },
-  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role"] },
+  type:        { handler: TypeCommand,     args: ["session", "name", "value", "role", "within"] },
   scroll:      { handler: ScrollCommand,   args: ["session", "direction", "amount", "to"] },
   content:     { handler: ContentCommand,  args: ["session", "selector", "format", "output"] },
   screenshot:  { handler: ScreenshotCommand, args: ["session", "output", "fullPage"] },
