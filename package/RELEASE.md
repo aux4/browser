@@ -2,8 +2,12 @@
 
 ## Fixes
 
-- **The package archive is now platform-neutral.** The build installed the bundled Playwright with
-  its optional dependencies, which on macOS includes `fsevents` and its native macOS binary
-  (`fsevents.node`). A package built on a Mac therefore carried a macOS-only file and was rejected on
-  Linux. Optional dependencies are now skipped (`npm install --omit=optional`); `fsevents` is only used
-  for file watching, which browser automation does not need. No change in behavior.
+- **macOS installs no longer depend on Homebrew's chromium cask.** Homebrew disabled the
+  `chromium` cask on 2026-09-01 because it fails the macOS Gatekeeper check, so installing
+  this package on a Mac without chromium failed. The cask was never used: the daemon drives
+  Playwright's own chromium, which downloads itself on the first `browser start` and is
+  self-contained on macOS. The chromium system dependency now applies on Linux only, where
+  the distro package still provides the shared libraries Playwright's chromium needs.
+- **The package archive is platform-neutral.** The build no longer installs optional npm
+  dependencies, so a package built on a Mac no longer carries the macOS-only
+  `fsevents.node` binary.
