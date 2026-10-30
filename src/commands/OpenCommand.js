@@ -10,7 +10,8 @@ export async function OpenCommand(params) {
     output: params.output,
     video: params.video,
     snapshot: params.snapshot,
-    waitUntil: params.waitUntil
+    waitUntil: params.waitUntil,
+    auditable: params.auditable
   });
   if (result.snapshot) {
     console.log(JSON.stringify(result));
