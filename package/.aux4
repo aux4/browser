@@ -15,9 +15,8 @@
       "linux:nodejs"
     ],
     [
-      "test:chromium --version",
-      "linux:chromium",
-      "cask:chromium"
+      "test:[ \"$(uname)\" != Linux ] || chromium --version",
+      "linux:chromium"
     ]
   ],
   "tags": [
