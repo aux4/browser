@@ -8,7 +8,7 @@ aux4 browser --help 2>/dev/null | head -2
 
 ```expect
 browser
-Headless browser automation.
+Headless browser automation — local (built in) or a remote provider like agentcore.
 ```
 
 ## start and stop daemon

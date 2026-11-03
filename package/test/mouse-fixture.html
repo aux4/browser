@@ -1,0 +1,13 @@
+<html>
+<body style="margin:0">
+  <div id="pad" style="position:absolute; left:0; top:0; width:400px; height:400px">
+    <button id="t" style="position:absolute; left:200px; top:150px; width:80px; height:40px">Target</button>
+  </div>
+  <div id="moved">no</div>
+  <div id="hit">none</div>
+  <script>
+    document.addEventListener('mousemove', function () { document.getElementById('moved').textContent = 'yes'; });
+    document.getElementById('t').addEventListener('click', function () { document.getElementById('hit').textContent = 'target'; });
+  </script>
+</body>
+</html>

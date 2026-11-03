@@ -1,0 +1,23 @@
+## core
+- click.test.md
+- component.test.md
+- content-warning.test.md
+- content.test.md
+- disk-output.test.md
+- fill.test.md
+- google-search.test.md
+- mouse.test.md
+- open.test.md
+- read.test.md
+- run.test.md
+- save-pdf.test.md
+- self-provision.test.md
+- snapshot.test.md
+- start.test.md
+- status-object.test.md
+- wait-modes.test.md
+- wait-until.test.md
+- within.test.md
+
+## browser-connector-local (optional)
+- browser__connect.test.md

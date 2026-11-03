@@ -6,7 +6,9 @@ export async function EvalCommand(params) {
     session: params.session,
     script: params.script
   });
-  if (result.result !== undefined) {
+  if (result.status === "unsupported") {
+    console.log(JSON.stringify(result));
+  } else if (result.result !== undefined) {
     console.log(typeof result.result === "string" ? result.result : JSON.stringify(result.result));
   }
 }

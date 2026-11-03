@@ -2,12 +2,24 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { chromium, firefox, webkit } from "playwright";
 
-const ENGINES = { chromium, firefox, webkit };
+let engines;
+
+function getEngines() {
+  if (!engines) {
+    try {
+      const require = createRequire(import.meta.url);
+      const { chromium, firefox, webkit } = require("playwright");
+      engines = { chromium, firefox, webkit };
+    } catch {
+      engines = {};
+    }
+  }
+  return engines;
+}
 
 function normalizeBrowserName(browserName) {
-  return ENGINES[browserName] ? browserName : "chromium";
+  return getEngines()[browserName] ? browserName : "chromium";
 }
 
 /**
@@ -15,8 +27,9 @@ function normalizeBrowserName(browserName) {
  * present on disk. Never throws — a missing/uninstalled browser reports false.
  */
 export function isBrowserInstalled(browserName = "chromium") {
-  const engine = ENGINES[normalizeBrowserName(browserName)];
   try {
+    const engine = getEngines()[normalizeBrowserName(browserName)];
+    if (!engine) return false;
     const execPath = engine.executablePath();
     return Boolean(execPath) && fs.existsSync(execPath);
   } catch {

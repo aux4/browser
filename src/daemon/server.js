@@ -5,6 +5,8 @@ import os from "node:os";
 import { SessionManager } from "./SessionManager.js";
 import { BrowserEngine } from "./BrowserEngine.js";
 import { ensureBrowserInstalled } from "./BrowserInstaller.js";
+import { ExtensionSessionManager } from "./ExtensionSessionManager.js";
+import { ExtensionBridge } from "./ExtensionBridge.js";
 
 const SOCKET_DIR = path.join(os.homedir(), ".aux4.config", "browser");
 const SOCKET_PATH = path.join(SOCKET_DIR, "browser.sock");
@@ -17,31 +19,47 @@ export class DaemonServer {
     this.channel = options.channel || "";
     this.browserName = options.browser || "";
     this.headed = options.headed || false;
+    this.backend = options.backend || "playwright";
+    this.wsPort = options.wsPort || 8765;
+    this.token = options.token || "";
     this.sessionManager = null;
     this.server = null;
     this.browser = null;
+    this.bridge = null;
   }
 
   async start() {
     fs.mkdirSync(SOCKET_DIR, { recursive: true });
     if (fs.existsSync(SOCKET_PATH)) fs.unlinkSync(SOCKET_PATH);
 
-    // Defensive self-heal for when the daemon is launched directly (not via the
-    // StartCommand parent, which already provisions the browser). No-op/quiet
-    // when the browser is already present.
-    ensureBrowserInstalled(this.browserName || "chromium");
+    if (this.backend === "extension") {
+      // Attach to the user's own Chrome via the extension — no Playwright launch.
+      this.bridge = new ExtensionBridge({ port: this.wsPort, token: this.token });
+      await this.bridge.start();
+      this.sessionManager = new ExtensionSessionManager(this.bridge, {
+        maxSessions: this.maxSessions,
+        onEmpty: () => {
+          if (!this.persistent) this.stop();
+        }
+      });
+    } else {
+      // Defensive self-heal for when the daemon is launched directly (not via the
+      // StartCommand parent, which already provisions the browser). No-op/quiet
+      // when the browser is already present.
+      ensureBrowserInstalled(this.browserName || "chromium");
 
-    const launchOptions = {};
-    if (this.channel) launchOptions.channel = this.channel;
-    if (this.browserName) launchOptions.browser = this.browserName;
-    if (this.headed) launchOptions.headed = true;
-    this.browser = await BrowserEngine.launch(launchOptions);
-    this.sessionManager = new SessionManager(this.browser, {
-      maxSessions: this.maxSessions,
-      onEmpty: () => {
-        if (!this.persistent) this.stop();
-      }
-    });
+      const launchOptions = {};
+      if (this.channel) launchOptions.channel = this.channel;
+      if (this.browserName) launchOptions.browser = this.browserName;
+      if (this.headed) launchOptions.headed = true;
+      this.browser = await BrowserEngine.launch(launchOptions);
+      this.sessionManager = new SessionManager(this.browser, {
+        maxSessions: this.maxSessions,
+        onEmpty: () => {
+          if (!this.persistent) this.stop();
+        }
+      });
+    }
 
     this.server = net.createServer((socket) => {
       let buffer = "";
@@ -62,7 +80,9 @@ export class DaemonServer {
     process.on("SIGTERM", () => this.stop());
     process.on("SIGINT", () => this.stop());
 
-    console.log(JSON.stringify({ status: "started", socket: SOCKET_PATH, pid: process.pid }));
+    const started = { status: "started", socket: SOCKET_PATH, pid: process.pid, backend: this.backend };
+    if (this.backend === "extension") started.wsPort = this.wsPort;
+    console.log(JSON.stringify(started));
   }
 
   async handleLine(socket, line) {
@@ -154,6 +174,7 @@ export class DaemonServer {
 
   async stop() {
     if (this.sessionManager) await this.sessionManager.closeAll();
+    if (this.bridge) this.bridge.stop();
     if (this.browser) await this.browser.close();
     if (this.server) this.server.close();
     try { fs.unlinkSync(SOCKET_PATH); } catch {}

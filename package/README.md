@@ -58,6 +58,46 @@ aux4 browser close --session <id>
 aux4 browser stop
 ```
 
+### Connect to an existing browser
+
+Use the Browser Connector when aux4 should control the Chrome profile you
+already have open, including its signed-in sessions:
+
+```bash
+# Start the local extension daemon and print a pairing token
+aux4 browser connect
+```
+
+Then install or load the [`aux4 Browser Connector`](https://github.com/aux4/browser-connector),
+paste the printed token into its popup, and click **Connect**. The default
+local WebSocket port is `8765` on both sides, so nothing needs configuring. If
+another local service uses it, override it with `--port` and tick **Use a custom
+port** in the popup to enter the same value:
+
+```bash
+aux4 browser connect --port 18765
+```
+
+The connector uses one local connection per browser profile and routes commands
+to the selected window or tab. It supports the normal browser command surface,
+with these extension-backend limitations: arbitrary `eval`, full-page
+screenshots, and full-page PDF output are unavailable.
+
+#### Run the local connector integration suite
+
+The optional aux4 test group exercises the installed Browser Connector rather
+than launching Playwright. Pair the extension first, leave `aux4 browser
+connect --port 18765` running, then run:
+
+```bash
+npm run build
+cd package/test
+aux4 test run --group browser-connector-local
+```
+
+The suite fails if the active daemon is not the extension-mode daemon, so a
+passing run is not accidentally satisfied by a headless browser.
+
 ### Navigation
 
 ```bash

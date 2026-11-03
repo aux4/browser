@@ -86,6 +86,22 @@
           }
         },
         {
+          "name": "connect",
+          "execute": [
+            "node ${packageDir}/lib/aux4-browser.mjs connect values(port)"
+          ],
+          "help": {
+            "text": "Connect to an existing Chrome through the aux4 browser extension",
+            "variables": [
+              {
+                "name": "port",
+                "text": "Local WebSocket port used by the extension",
+                "default": "8765"
+              }
+            ]
+          }
+        },
+        {
           "name": "open",
           "execute": [
             "node ${packageDir}/lib/aux4-browser.mjs open values(url,timeout,width,height,output,video,snapshot,waitUntil,new)"

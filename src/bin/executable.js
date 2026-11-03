@@ -1,4 +1,5 @@
 import { StartCommand } from "../commands/StartCommand.js";
+import { ConnectCommand } from "../commands/ConnectCommand.js";
 import { StopCommand } from "../commands/StopCommand.js";
 import { OpenCommand } from "../commands/OpenCommand.js";
 import { CloseCommand } from "../commands/CloseCommand.js";
@@ -44,6 +45,7 @@ const values = args.slice(1);
 
 const commands = {
   start:       { handler: StartCommand,    args: ["maxSessions", "persistent", "channel", "browser", "headed"] },
+  connect:     { handler: ConnectCommand,  args: ["port"] },
   stop:        { handler: StopCommand,     args: [] },
   open:        { handler: OpenCommand,     args: ["url", "timeout", "width", "height", "output", "video", "snapshot", "waitUntil", "new"] },
   close:       { handler: CloseCommand,    args: ["session"] },

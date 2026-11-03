@@ -13,6 +13,7 @@ aux4 browser <command> [options]
 **Lifecycle:**
 
 - `start` — Start the browser daemon
+- `connect` — Connect to an existing Chrome profile through the Browser Connector
 - `stop` — Stop the browser daemon
 - `open` — Open a new browser session
 - `close` — Close a browser session
