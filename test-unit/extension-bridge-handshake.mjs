@@ -5,9 +5,9 @@
 // the wire-level handshake rules: bad token, protocol version mismatch,
 // non-hello first frame, a valid handshake, and connection replacement.
 //
-// Run directly with node from package/test: `node extension-bridge-handshake.mjs`
+// Run from the repo root: `npm run test:bridge` (not part of the shipped aux4 test suite, since it imports src/).
 import WebSocket from "ws";
-import { ExtensionBridge, PROTOCOL_VERSION } from "../../src/daemon/ExtensionBridge.js";
+import { ExtensionBridge, PROTOCOL_VERSION } from "../src/daemon/ExtensionBridge.js";
 
 const TOKEN = "test-token-" + Math.random().toString(36).slice(2);
 
