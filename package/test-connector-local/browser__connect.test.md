@@ -1,7 +1,12 @@
 # Browser Connector integration
 
 This is a local-only integration suite for the separately installed aux4
-Browser Connector extension. Before running it:
+Browser Connector extension. It lives outside `package/test/` (in
+`package/test-connector-local/`) precisely so neither the default `aux4
+test run` nor CI discover and run it -- it depends on a paired extension
+and would otherwise fail every time no extension is connected. Run it on
+its own, from `package`, with `aux4 test run test-connector-local`. Before
+running it:
 
 1. Load or install the extension from
    `https://github.com/aux4/browser-connector/releases`.

@@ -86,14 +86,16 @@ screenshots, and full-page PDF output are unavailable.
 
 #### Run the local connector integration suite
 
-The optional aux4 test group exercises the installed Browser Connector rather
-than launching Playwright. Pair the extension first, leave `aux4 browser
-connect --port 18765` running, then run:
+This suite exercises the installed Browser Connector rather than launching
+Playwright. It lives in `package/test-connector-local/`, outside the
+`test/` directory that `aux4 test run` and CI scan by default, so it never
+runs unless you ask for it by name. Pair the extension first, leave `aux4
+browser connect --port 18765` running, then run:
 
 ```bash
 npm run build
-cd package/test
-aux4 test run --group browser-connector-local
+cd package
+aux4 test run test-connector-local
 ```
 
 The suite fails if the active daemon is not the extension-mode daemon, so a

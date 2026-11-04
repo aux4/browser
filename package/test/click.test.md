@@ -70,3 +70,43 @@ clicked:false
 reason:no-match
 hasDescription:true
 ```
+
+## Type
+
+```beforeAll
+nohup aux4 browser start --persistent true >/dev/null 2>&1 &
+sleep 4
+```
+
+```afterAll
+aux4 browser stop
+sleep 1
+```
+
+### should type by snapshot ref index
+
+```timeout
+30000
+```
+
+```file:type-fixture.html
+<html>
+<body>
+  <input id="field1" type="text" />
+</body>
+</html>
+```
+
+```execute
+SESSION=$(aux4 browser open --url "file://$PWD/type-fixture.html" 2>/dev/null)
+SNAP=$(aux4 browser snapshot --session $SESSION 2>/dev/null)
+REF=$(echo "$SNAP" | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).snapshot.elements[0].ref")
+aux4 browser type --session $SESSION --ref $REF --value "hello ref" 2>/dev/null | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).status"
+aux4 browser eval --session $SESSION --script "document.getElementById('field1').value" 2>/dev/null
+aux4 browser close --session $SESSION >/dev/null 2>&1
+```
+
+```expect:partial
+ok
+hello ref
+```

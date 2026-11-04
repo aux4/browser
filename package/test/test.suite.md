@@ -4,6 +4,7 @@
 - content-warning.test.md
 - content.test.md
 - disk-output.test.md
+- extension-bridge-handshake.test.md
 - fill.test.md
 - google-search.test.md
 - mouse.test.md
@@ -18,6 +19,3 @@
 - wait-modes.test.md
 - wait-until.test.md
 - within.test.md
-
-## browser-connector-local (optional)
-- browser__connect.test.md
