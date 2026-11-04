@@ -1,5 +1,21 @@
 # Release notes
 
+## `connect` — drive the Chrome you already have open
+
+`aux4 browser connect` pairs the daemon with the aux4 Browser Connector extension, so the usual
+commands (`open`, `snapshot`, `click`, `fill`, …) operate your real Chrome profile and its
+signed-in sessions instead of a fresh Playwright browser.
+
+```bash
+aux4 browser connect            # prints a pairing token; paste it into the extension popup
+aux4 browser snapshot --format text
+```
+
+The WebSocket port defaults to `8765` on both sides, so the extension popup hides the port field.
+If that port is taken, run `aux4 browser connect --port 18765` and tick **Use a custom port** in
+the popup. Arbitrary `eval`, full-page screenshots and full-page PDFs are not available through
+the extension.
+
 ## `fill` — a whole form in one call
 
 Filling a form meant choosing a command per field: `type` for a text box, `select` for a dropdown,
@@ -110,3 +126,15 @@ Only the same host collides; a different site is normal multi-session use and is
 - `--ref` overrides `--name`/`--role` when both are given.
 - `fill` handles text boxes, dropdowns, checkboxes, radios and switches. Radio *groups* are not
   addressable by group name yet — each radio matches on its own label.
+
+## Install fixes
+
+- **macOS installs no longer depend on Homebrew's chromium cask.** Homebrew disabled the
+  `chromium` cask on 2026-09-01 because it fails the macOS Gatekeeper check, so installing
+  this package on a Mac without chromium failed. The cask was never used: the daemon drives
+  Playwright's own chromium, which downloads itself on the first `browser start` and is
+  self-contained on macOS. The chromium system dependency now applies on Linux only, where
+  the distro package still provides the shared libraries Playwright's chromium needs.
+- **The package archive is platform-neutral.** The build no longer installs optional npm
+  dependencies, so a package built on a Mac no longer carries the macOS-only
+  `fsevents.node` binary.

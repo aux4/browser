@@ -13,16 +13,17 @@ run `aux4 browser start`, the daemon detects whether Playwright's chromium binar
 is present and, if it is missing, downloads it automatically (a one-time step,
 printed to stderr). Subsequent starts are silent and instant.
 
-Chromium's OS package is declared in the package `system` field — `linux:chromium`
-on Linux (via the apt / dnf / apk system installer) and `cask:chromium` on macOS
-(via the brew cask installer). On `pkger install` the aux4 system installer runs the
-matching one when present, which pulls in chromium together with its shared
-libraries.
+On Linux, Chromium needs OS shared libraries (`libglib`, `libnss3`, ...) that
+Playwright cannot install without root. The package declares `linux:chromium` in its
+`system` field, so on `pkger install` the aux4 system installer (apt / dnf / apk)
+installs the distro chromium package, which pulls in those libraries. On macOS
+nothing is installed: Playwright's chromium build is self-contained, so the system
+dependency is skipped there.
 
 **Note:** the chromium *binary* the daemon actually drives is a Playwright download
 (version-matched to the bundled Playwright), provisioned in code at the first
-`browser start` — no root required. The `system` field covers the OS-level chromium
-package and its libraries.
+`browser start` — no root required. The `system` field only provides the shared
+libraries it needs on Linux.
 
 ## Architecture
 

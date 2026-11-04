@@ -9,10 +9,10 @@ one-time `browser: chromium runtime not found — installing it now ...` notice 
 stderr while downloading. stdout stays clean JSON. When chromium is already
 installed the check is silent. There is no separate manual install step.
 
-Chromium's OS package is declared in the package `system` field — `linux:chromium`
-(apt/dnf/apk) on Linux and `cask:chromium` (brew cask) on macOS — installed by the
-aux4 system installer on `pkger install` when a matching one is present, which pulls
-in chromium and its shared libraries.
+On Linux, the package `system` field declares `linux:chromium` (apt/dnf/apk), which the
+aux4 system installer installs on `pkger install` to provide chromium's shared
+libraries. On macOS no system package is needed: Playwright's chromium is
+self-contained.
 
 ## Usage
 
